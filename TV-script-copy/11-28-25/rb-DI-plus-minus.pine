@@ -1,0 +1,207 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © rinebob
+// library code originally copied from @BeikabuOyaji
+
+//@version=5
+indicator("rb DI+/-", overlay=false, timeframe='', timeframe_gaps=false)
+
+// import rinebob/rb_TA_lib/9 as rbLib
+import rinebob/rb_TA_lib/14 as rbLib
+
+///////////// INPUTS ////////////////////////////
+
+adx_length = input.int(14, "ADX length")
+higher_timeframe = input.timeframe('2')
+upper_thresh = input.int(10, "Upper threshold")
+lower_thresh = input.int(-10, "Lower threshold")
+upColor = input.color(color.blue, "Up color")
+dnColor = input.color(color.yellow, "Down color")
+upColor50 = color.new(upColor, 50)
+dnColor50 = color.new(dnColor, 50)
+
+/////////// HIGHER TIMEFRAME DATA SOURCE ///////////////////
+
+int chart_tf_seconds = timeframe.in_seconds()
+int htf_seconds = timeframe.in_seconds(higher_timeframe)
+
+// function to request higher time frame data without repainting
+requestTimeFrame(timeframe, expression) =>
+    request.security(syminfo.tickerid, timeframe, expression, lookahead=barmerge.lookahead_on)
+
+htf_open         = requestTimeFrame(higher_timeframe, open)
+htf_high         = requestTimeFrame(higher_timeframe, high)
+htf_low         = requestTimeFrame(higher_timeframe, low)
+htf_close         = requestTimeFrame(higher_timeframe, close)
+htf_close_time        = requestTimeFrame(higher_timeframe, time_close)
+
+///////////////////////// INDICATOR CODE /////////////////////////////////
+
+method rb_adx_di(simple int adx_length = 14, simple int higher_timeframe = 180, series float data_source_high = high, series float data_source_low = low, series float data_source_close = close, series int htf_close_time = time_close) =>
+
+    htf_multiplier = math.round(higher_timeframe / timeframe.in_seconds())
+    // int adjusted_adx_length = adx_length * htf_multiplier
+    int adjusted_adx_length = adx_length
+    
+    //////////////////// Chart timeframe calcs /////////////////////////////
+    // true range = highest of: (highest of: (high-low or abs high - yest close) or (abs low - yest close))
+    series float trueRange = math.max(math.max(data_source_high - data_source_low, math.abs(data_source_high - nz(data_source_close[htf_multiplier]))), math.abs(data_source_low - nz(data_source_close[htf_multiplier])))
+
+    // DI+ = if high - yest high is greater than yest low - low, then highest of: high - yest high or zero else zero
+    directionalMovementPlus = data_source_high - nz(data_source_high[htf_multiplier]) > nz(data_source_low[htf_multiplier]) - data_source_low ? math.max(data_source_high - nz(data_source_high[htf_multiplier]), 0): 0
+
+    // DI- = if yest low - low is greater than high - yest high, then highest of: yest low - low or zero else zero
+    directionalMovementMinus = nz(data_source_low[htf_multiplier]) - data_source_low > data_source_high - nz(data_source_high[htf_multiplier]) ? math.max(nz(data_source_low[htf_multiplier]) - data_source_low, 0): 0
+
+    series float smoothedTrueRange = 0.0
+    smoothedTrueRange := nz(smoothedTrueRange[htf_multiplier]) - (nz(smoothedTrueRange[htf_multiplier]) / adjusted_adx_length) + trueRange
+
+    series float smoothedDirectionalMovementPlus = 0.0
+    smoothedDirectionalMovementPlus := nz(smoothedDirectionalMovementPlus[htf_multiplier]) - (nz(smoothedDirectionalMovementPlus[htf_multiplier]) / adjusted_adx_length) + directionalMovementPlus
+
+    series float smoothedDirectionalMovementMinus = 0.0
+    smoothedDirectionalMovementMinus := nz(smoothedDirectionalMovementMinus[htf_multiplier]) - (nz(smoothedDirectionalMovementMinus[htf_multiplier]) / adjusted_adx_length) + directionalMovementMinus
+
+    series float diPlus = smoothedDirectionalMovementPlus / smoothedTrueRange * 100
+    series float diMinus = smoothedDirectionalMovementMinus / smoothedTrueRange * 100
+    series float dx = math.abs(diPlus-diMinus) / (diPlus+diMinus)*100
+    series float adx = ta.sma(dx, adjusted_adx_length)
+    series float diHist = diPlus - diMinus
+
+    ////////////// HTF CALCS ////////////////////////////////////
+    // htf_multiplier = htf_seconds / timeframe.in_seconds()
+    // int adjusted_adx_length = adx_length
+    var closeTimeMatch = false
+    closeTimeMatch := time_close == htf_close_time
+
+    // series float htfTrueRange = closeTimeMatch ? trueRange : trueRange[1]
+
+    /////////// RETURN STATEMENT //////////////////////////
+
+    [diPlus, diMinus, dx, adx, diHist, closeTimeMatch, htf_multiplier, adjusted_adx_length]
+
+///////////// FUNCTION CALLS ////////////////////////////
+
+// internal method
+// [diPlus, diMinus, dx, adx, diHist, closeTimeMatch, multiplier, adxLength] = rb_adx_di(adx_length, chart_tf_seconds, high, low, close, time_close)
+// [htfDiPlus, htfDiMinus, htfDx, htfAdx, htfDiHist, htfCloseTimeMatch, htfMultiplier, adjustedAdxLength] = rb_adx_di(adx_length, htf_seconds, htf_high, htf_low, htf_close, htf_close_time)
+
+
+
+// v9
+// [diPlus, diMinus, dx, adx, diHist, closeTimeMatch, multiplier, adxLength] = rbLib.rb_di_plus_minus(adx_length, chart_tf_seconds, high, low, close, time_close)
+// [htfDiPlus, htfDiMinus, htfDx, htfAdx, htfDiHist, htfCloseTimeMatch, htfMultiplier, adjustedAdxLength] = rbLib.rb_di_plus_minus(adx_length, htf_seconds, htf_high, htf_low, htf_close, htf_close_time)
+
+// v14
+[diPlus, diMinus, dx, adx, diHist, closeTimeMatch, htf_multiplier2, adjustedAdxLength, fastCrossesZero, fastCrossesAboveZero, fastCrossesBelowZero, fastCrossesAboveUpperThresh, fastCrossesBelowLowerThresh, fastCrossesBelowUpperThresh, fastCrossesAboveLowerThresh, upBreak, dnBreak] = rbLib.rb_di_plus_minus(adx_length, chart_tf_seconds, high, low, close, time_close)
+[htfDiPlus, htfDiMinus, htfDx, htfAdx, htfDiHist, htfCloseTimeMatch, htfMultiplier, htfAdjustedAdxLength, htfFastCrossesZero, htfFastCrossesAboveZero, htfFastCrossesBelowZero, htfFastCrossesAboveUpperThresh, htfFastCrossesBelowLowerThresh, htfFastCrossesBelowUpperThresh, htfFastCrossesAboveLowerThresh, htfUpBreak, htfDnBreak] = rbLib.rb_di_plus_minus(adx_length, htf_seconds, htf_high, htf_low, htf_close, htf_close_time)
+
+
+
+////////// PLOTS //////////////////
+// colors
+diHistColor = diHist > 0 ? upColor : dnColor
+htfDiHistColor = htfDiHist > 0 ? upColor : dnColor
+// htfDiHistColor = htfDiHist > 0 ? upColor50 : dnColor50
+
+// DI lines 
+// Note: showing all just looks like chaos...
+plot(diPlus, "diPlus", color=color.blue, style = plot.style_stepline, linewidth = 3)
+plot(diMinus, "diMinus", color=color.yellow, style = plot.style_stepline, linewidth = 3)
+// plot(htfDiPlus, "htfDiPlus", color=color.blue, style = plot.style_stepline, linewidth = 3)
+// plot(htfDiMinus, "htfDiMinus", color=color.yellow, style = plot.style_stepline, linewidth = 3)
+
+
+// histogram
+diHistPlot = plot(diHist, title = "DI Histogram", color=diHistColor, style = plot.style_histogram, linewidth = 3, editable = true)
+// htfDiHistPlot = plot(htfDiHist, title = "HTF DI Histogram", color=htfDiHistColor, style = plot.style_columns, editable = true)
+
+zeroLine = plot(0, "Zero line", color=color.white, style = plot.style_line, linewidth = 2)
+hline(upper_thresh, color=color.white, title="DI+ threshold", linestyle = hline.style_solid)
+hline(lower_thresh, color=color.white, title="DI- threshold", linestyle = hline.style_solid)
+// fill(zeroLine, diHist, DIHistColor, title="DIHist fill")
+
+// plot(htfCloseTimeMatch ? 0 : na, "htf timeframe close match", color=color.white, style = plot.style_cross, linewidth = 3)
+plot(bar_index, "bar index", display = display.data_window, precision = 0)
+
+//////////// CROSSOVERS /////////////
+
+// fastCrossesZero = ta.cross(diHist, 0)
+// fastCrossesAboveZero = ta.crossover(diHist, 0)
+// fastCrossesBelowZero = ta.crossunder(diHist, 0)
+// fastCrossesAboveUpperThresh = ta.crossover(diHist, upper_thresh)
+// fastCrossesBelowLowerThresh = ta.crossunder(diHist, lower_thresh)
+// fastCrossesBelowUpperThresh = ta.crossunder(diHist, upper_thresh)
+// fastCrossesAboveLowerThresh = ta.crossover(diHist, lower_thresh)
+
+// upBreak = diHist > 0 and diHist > diHist[1] and diHist[1] < diHist[2]
+// dnBreak = diHist < 0 and diHist < diHist[1] and diHist[1] > diHist[2]
+
+// plot(fastCrossesAboveZero ? lower_thresh : na, "DI cross above zero", style = plot.style_cross, color=upColor, linewidth = 3)
+// plot(fastCrossesBelowZero ? upper_thresh : na, "DI cross below zero", style = plot.style_cross, color=dnColor, linewidth = 3)
+plot(fastCrossesAboveZero ? diHist : na, "DI cross above zero", style = plot.style_cross, color=upColor, linewidth = 3)
+plot(fastCrossesBelowZero ? diHist : na, "DI cross below zero", style = plot.style_cross, color=dnColor, linewidth = 3)
+plot(fastCrossesAboveUpperThresh ? diHist : na, "DI cross above upper", style = plot.style_circles, color=upColor, linewidth = 3)
+plot(fastCrossesBelowLowerThresh ? diHist : na, "DI cross below lower", style = plot.style_circles, color=dnColor, linewidth = 3)
+plot(fastCrossesBelowUpperThresh ? diHist : na, "DI cross below upper", style = plot.style_circles, color=dnColor, linewidth = 3)
+plot(fastCrossesAboveLowerThresh ? diHist : na, "DI cross above lower", style = plot.style_circles, color=upColor, linewidth = 3)
+
+plot(upBreak ? diHist : na, "upBreak", style = plot.style_cross, color=color.green, linewidth = 3)
+plot(dnBreak ? diHist : na, "dnBreak", style = plot.style_cross, color=color.red, linewidth = 3)
+
+
+///////////// END ATR DI+/- COMPONENTS ////////////////////////////
+
+/////////// DEBUGGING /////////////////////////
+// for comparing library code to above method output
+// [diPlus, diMinus, dx, adx, diHist, closeTimeMatch, multiplier, adxLength] = rb_TA_lib.rb_di_plus_minus(adx_length, chart_tf_seconds, high, low, close, time_close)
+// [htfDiPlus, htfDiMinus, htfDx, htfAdx, htfDiHist, htfCloseTimeMatch, htfMultiplier, adjustedAdxLength] = rb_TA_lib.rb_di_plus_minus(adx_length, htf_seconds, htf_high, htf_low, htf_close, htf_close_time)
+// [diPlus2, diMinus2, dx2, adx2, diHist2, closeTimeMatch2, multiplier2, adxLength2] = rb_adx_di(adx_length, chart_tf_seconds, high, low, close, time_close)
+// [htfDiPlus2, htfDiMinus2, htfDx2, htfAdx2, htfDiHist2, htfCloseTimeMatch2, htfMultiplier2, adjustedAdxLength2] = rb_adx_di(adx_length, htf_seconds, htf_high, htf_low, htf_close, htf_close_time)
+
+// plot(diHist, title = "DI Histogram LIB", color=diHistColor, style = plot.style_histogram)
+// plot(diHist2, title = "DI Histogram FN", color=diHistColor, style = plot.style_histogram)
+// plot(htfDiHist, title = "HTF DI Histogram LIB", color=htfDiHistColor, style = plot.style_columns)
+// plot(htfDiHist2, title = "HTF DI Histogram FN", color=htfDiHistColor, style = plot.style_columns)
+
+// plot(diPlus, "diPlus", color=color.blue, style = plot.style_stepline, linewidth = 3)
+// plot(diMinus, "diMinus", color=color.yellow, style = plot.style_stepline, linewidth = 3)
+// plot(htfDiPlus, "htfDiPlus", color=color.blue, style = plot.style_stepline, linewidth = 3)
+// plot(htfDiMinus, "htfDiMinus", color=color.yellow, style = plot.style_stepline, linewidth = 3)
+
+
+///////// LOGGING //////////////////
+
+formattedTime = str.format_time(time, "yyyy-MM-dd HH:mm", syminfo.timezone)
+
+log.info(
+     "\n====== solo DI +/- ind START {0} {1} ======== \n
+      diPlus: {2}\n
+      diMinus: {3}\n
+      dx: {4}\n
+      adx: {5}\n
+     ",
+
+     formattedTime, bar_index, diPlus, diMinus, dx, adx
+  )
+
+log.info(
+     "diHist: {2}\n
+      htfDiHist: {3}\n
+      htfCloseTimeMatch: {4}\n
+      diHist = htfDiHist: {5}\n
+      time_close: {6}\n
+      htfTimeClose: {7}\n
+      htfMultiplier: {8}\n
+      adjustedAdxLength: {9}\n
+      fastCrossesAboveZero: {10}\n
+      fastCrossesBelowZero: {11}\n
+      fastCrossesAboveUpperThresh: {12}\n
+      fastCrossesBelowLowerThresh: {13}\n
+      fastCrossesBelowUpperThresh: {14}\n
+      fastCrossesAboveLowerThresh: {15}\n
+      ==== solo DI +/- ind END {0} {1} ===============\n
+     ",
+
+     formattedTime, bar_index, diHist, htfDiHist, htfCloseTimeMatch, diHist == htfDiHist, time_close, htf_close_time, htfMultiplier, adjustedAdxLength, fastCrossesAboveZero, fastCrossesBelowZero, fastCrossesAboveUpperThresh, fastCrossesBelowLowerThresh, fastCrossesBelowUpperThresh, fastCrossesAboveLowerThresh
+  )
+

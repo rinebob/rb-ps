@@ -1,0 +1,797 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © rinebob
+
+//@version=5
+indicator("rb HA ST DC DI", "rb HA ST DC DI", timeframe="", timeframe_gaps=false)
+
+import rinebob/rb_TA_lib/16 as rbLib
+
+
+//#region------------------------ General -------------------------------
+
+//////////////////////// GENERAL ////////////////////////////////////
+
+formattedTime = str.format_time(time, "yyyy-MM-dd HH:mm", syminfo.timezone)
+
+log.info(
+     // "\n************************************************** \n",
+     "\n***************** GLOBAL START {0} {1} ************* \n",
+
+     formattedTime, bar_index
+  )
+
+////// INPUTS ///////
+higher_timeframe = input.timeframe('3', "Higher timeframe", group="HA Bands")
+
+
+
+//////// VARS ///////////////////
+int chart_tf_seconds = timeframe.in_seconds()
+int htf_seconds = timeframe.in_seconds(higher_timeframe)
+
+// function to request higher time frame data without repainting
+requestTimeFrame(timeframe, expression) =>
+    request.security(syminfo.tickerid, timeframe, expression, lookahead=barmerge.lookahead_on)
+
+htfO         = requestTimeFrame(higher_timeframe, open)
+htfH         = requestTimeFrame(higher_timeframe, high)
+htfL         = requestTimeFrame(higher_timeframe, low)
+htfC         = requestTimeFrame(higher_timeframe, close)
+htfTC        = requestTimeFrame(higher_timeframe, time_close)
+
+// Moving average type - hard-coded as EMA
+var MA_TYPE = 'EMA'
+
+// BAND COLORS
+// color color_blue = #0000FF
+color color_blue = color.blue
+color color_yellow = #FFFF00
+color color_black = #000000
+color color_white = #FFFFFF
+
+upColor = color_yellow
+dnColor = color_blue
+
+// diagnostic plots
+// plot(htfO, "htfO", color.white)
+// plot(htfH, "htfH", color.green)
+// plot(htfL, "htfL", color.red)
+// plot(htfC, "htfClose", color.fuchsia)
+// plot(closeMatch3, "closeTimeMatch3", display = display.data_window)
+// plot(htfCloseTimeMatch ? 0 : na, "htf timeframe close match", color=color.white, style = plot.style_cross, linewidth = 3)
+
+
+plot(bar_index, "Bar index", display = display.data_window, precision = 0)
+
+///////// LOGGING //////////////////
+
+
+
+/////////////////// END GENERAL //////////////////////////////
+
+//#endregion------------------------ General -------------------------------
+
+//#region------------------------ Heiken Ashi -------------------------------
+
+//////////////////////// HEIKEN ASHI BANDS ////////////////////////////////////////
+// User inputs from TAExt.heiken_ashi:
+//
+ha_smooth_length_fast = input.int(5, "Fast length", minval=1, group="HA Bands")
+ha_smooth_length_slow = input.int(10, "Slow length", minval=1, group="HA Bands")      
+
+// Bands 1 and 2
+
+// [b1o, b1h, b1l, b1c, b1oo, b1hh, b1ll, b1cc, closeTimeMatch1] = rbLib.htf_heiken_ashi(
+[b1o, b1h, b1l, b1c, b1m, b1Up, b1Dn, b1oo, b1hh, b1ll, b1cc, b1mm, b1htfUp, b1htfDn, closeCrossesAboveFast1, closeCrossesBelowFast1, closeTimeMatch1] = rbLib.htf_heiken_ashi(
+     smooth_length=ha_smooth_length_fast, after_smooth_length=ha_smooth_length_fast,
+     higher_timeframe=timeframe.period,
+     src_open=htfO, src_close=htfC, src_high=htfH, src_low=htfL, htf_close_time=htfTC
+     )
+
+// [b2o, b2h, b2l, b2c, b2oo, b2hh, b2ll, b2cc, closeTimeMatch2] = rbLib.htf_heiken_ashi(
+[b2o, b2h, b2l, b2c, b2m, b2Up, b2Dn, b2oo, b2hh, b2ll, b2cc, b2mm, b2htfUp, b2htfDn, closeCrossesAboveFast2, closeCrossesBelowFast2, closeTimeMatch2] = rbLib.htf_heiken_ashi(
+     smooth_length=ha_smooth_length_slow, after_smooth_length=ha_smooth_length_slow, 
+     higher_timeframe=timeframe.period,
+     src_open=htfO, src_close=htfC, src_high=htfH, src_low=htfL, htf_close_time=htfTC
+     )
+
+// Setting high and low as open or close based on which is higher avoids showing wicks on the bars
+// TODO: move to library
+b1h := b1o > b1c ? b1o : b1c
+b1l := b1o > b1c ? b1c : b1o
+b2h := b2o > b2c ? b2o : b2c
+b2l := b2o > b2c ? b2c : b2o
+
+// Fast HA bands - chart timeframe
+
+// ///////// UNCOMMENT TO SHOW FAST HA BANDS //////////////////
+// plotcandle(b1o, b1h, b1l, b1c, title="Fast smHA", 
+//      color = b1c > b1o ? upColor : dnColor, force_overlay = true)
+
+// plotcandle(b2o, b2h, b2l, b2c, title="Slow smHA", 
+//          color = b2c > b2o ? upColor : dnColor, force_overlay = true)
+
+// //////////////////////////////// 
+
+// Bands 3 and 4
+// Using higher timeframe data in indicators is more complex
+// I found this video that goes over the principles
+// https://www.youtube.com/watch?v=AtTFSFhrLoA
+// Pine Script 101 - How to work with HIGHER TIME FRAMES by Zero Hero Trading
+// https://www.youtube.com/@ZeroHeroTrading
+// Code is here:
+// https://www.tradingview.com/script/2IPNpxZ8-Higher-Time-Frame/
+
+
+[b3o, b3h, b3l, b3c, b3m, b3Up, b3Dn, b3oo, b3hh, b3ll, b3cc, b3mm, b3htfUp, b3htfDn, closeCrossesAboveSlow1, closeCrossesBelowSlow1, closeTimeMatch3] = rbLib.htf_heiken_ashi(
+     smooth_length=ha_smooth_length_fast, after_smooth_length=ha_smooth_length_fast,
+     higher_timeframe=higher_timeframe,
+     src_open=htfO, src_close=htfC, src_high=htfH, src_low=htfL, htf_close_time=htfTC
+     )
+
+[b4o, b4h, b4l, b4c, b4m, b4Up, b4Dn, b4oo, b4hh, b4ll, b4cc, b4mm, b4htfUp, b4htfDn, closeCrossesAboveSlow2, closeCrossesBelowSlow2, closeTimeMatch4] = rbLib.htf_heiken_ashi(
+     smooth_length=ha_smooth_length_slow, after_smooth_length=ha_smooth_length_slow, 
+     higher_timeframe=higher_timeframe,
+     src_open=htfO, src_close=htfC, src_high=htfH, src_low=htfL, htf_close_time=htfTC
+     )
+
+// creates smooth bands with different candles for each bar
+// doesn't resemble the jagged step-like higher time frame HA band when added to a chart manually
+b3h := b3o > b3c ? b3o : b3c
+b3l := b3o > b3c ? b3c : b3o
+b4h := b4o > b4c ? b4o : b4c
+b4l := b4o > b4c ? b4c : b4o
+
+// creates jagged bands with different candle only when chart timeframe close equals the higher timeframe close
+// mimics the jagged step-like higher time frame HA band when added to a chart manually
+// these are the values used in the plots
+b3hh := closeTimeMatch3 ? b3oo > b3cc ? b3oo : b3cc : b3hh[1]
+b3ll := closeTimeMatch3 ? b3oo > b3cc ? b3cc : b3oo : b3ll[1]
+b4hh := closeTimeMatch4 ? b4oo > b4cc ? b4oo : b4cc : b4hh[1]
+b4ll := closeTimeMatch4 ? b4oo > b4cc ? b4cc : b4oo : b4ll[1]
+
+closeMatch3 = closeTimeMatch3 ? 1 : -1
+
+
+///////////////// SIGNALS / CROSSOVERS ////////////////////////
+
+// categories for different permutations of Up/down trends
+threeUp = (b1Up and b2Up and b3Up) or (b1Up and b2Dn and b3Up)
+twoUp = b1Dn and b2Up and b3Up
+oneUp = b1Dn and b2Dn and b3Up
+oneDown = b1Up and b2Up and b3Dn
+twoDown = b1Up and b2Dn and b3Dn
+threeDown = (b3Dn and b2Dn and b1Dn) or (b3Dn and b2Up and b1Dn)
+
+// Band midpoints
+// TODO: Add midpoint of band to smHA library code and export it, then replace these calcs with the midpoint output of each library function call above
+midpoint = low + (math.abs(high - low) / 2)
+b1mid = b1m
+b2mid = b2m
+// smooth
+b3mid = b3m
+// jagged
+// b3mid = b3mm
+// b4mid = b4mm
+
+// Price vs HA band zones
+zonePlusThree = (midpoint > b1mid and (oneUp or twoUp or threeUp)) or (midpoint > b3mid and (threeDown or twoDown or oneDown))
+zoneMinusThree = (midpoint < b1mid and (oneDown or twoDown or threeDown)) or (midpoint < b3mid and (oneUp or twoUp or threeUp))
+
+zonePlusTwo = ((midpoint > b2mid) and (midpoint <= b1mid)) and (twoUp or threeUp)
+zoneMinusTwo = ((midpoint < b2mid) and (midpoint >= b1mid)) and (twoDown or threeDown)
+
+zonePlusOne = (midpoint > b3mid and midpoint <= b2mid) and (oneUp or twoUp or threeUp)
+zoneMinusOne = (midpoint < b3mid and midpoint >= b2mid) and (oneDown or twoDown or threeDown)
+
+
+///////////////// PLOTS //////////////////
+// Band one cross over/under
+separation = 0.2
+// plot(closeCrossesAboveFast1 ? low - separation : na, "cross above fast 1", style = plot.style_circles, color=color.blue, linewidth = 4, force_overlay=true)
+// plot(closeCrossesBelowFast1 ? high + separation : na, "cross below fast 1", style = plot.style_circles, color=color.yellow, linewidth = 4, force_overlay=true)
+
+// Bar colors / plots
+trendColor = threeUp ? color.blue : twoUp ? color.teal : oneUp ? color.silver : oneDown ? color.white : twoDown ? color.fuchsia : threeDown ? color.yellow : color.navy
+// barcolor(trendColor)
+
+smHAColor = zonePlusThree ? color.blue : zonePlusTwo ? color.teal : zonePlusOne ? color.silver : zoneMinusOne ? color.white : zoneMinusTwo ? color.fuchsia : zoneMinusThree ? color.yellow : color.navy
+barcolor(smHAColor)
+
+
+///////// UNCOMMENT TO SHOW SLOW HA BANDS //////////////////
+
+// Smooth plot - each candle has different high/low
+// plotcandle(b3o, b3h, b3l, b3c, title="Fast HTF smHA", 
+//          color = b3c < b3o ? color_yellow : color_blue
+//          )
+
+// Jagged plot - resembles actual htf ha band.  New high/low only when time_close = htf_time_close
+plotcandle(b3oo, b3hh, b3ll, b3cc, title="Fast HTF smHA", 
+         color = b3c > b3o ? upColor : dnColor, force_overlay = true
+         )
+
+// smooth plot
+// plotcandle(b4o, b4h, b4l, b4c, title="Slow HTF smHA", 
+//          color = b4c < b4o ? color_yellow : color_blue, force_overlay = true
+//          )
+
+// jagged plot
+// plotcandle(b4oo, b4hh, b4ll, b4cc, title="Slow HTF smHA 2", 
+//          color = b4c > b4o ? upColor : dnColor
+//          )
+
+
+
+///////// FAST HA BANDS //////////////////
+plotcandle(b1o, b1h, b1l, b1c, title="Fast smHA", 
+     color = b1c > b1o ? upColor : dnColor, force_overlay = true)
+
+plotcandle(b2o, b2h, b2l, b2c, title="Slow smHA", 
+         color = b2c > b2o ? upColor : dnColor, force_overlay = true)
+
+//////////////////////////////// 
+
+//#region------------------------ Heiken Ashi logging -------------------------------
+
+///////// LOGGING //////////////////
+
+
+log.info(
+     "\n====== Heiken Ashi start {0} {1} ======== \n",
+
+     formattedTime, bar_index
+  )
+
+log.info(
+     "\nmidpoints \n
+      midpoint: {0}\n
+      b1mid: {1}\n
+      b2mid: {2}\n
+      b3mid: {3}\n
+      end zones\n
+     ",
+
+     midpoint, b1mid, b2mid, b3mid
+  )
+
+log.info(
+     "\nmidpoint status \n
+      midpoint > b1mid: {0}\n
+      midpoint > b2mid: {1}\n
+      midpoint > b3mid: {2}\n
+      midpoint < b1mid: {3}\n
+      midpoint < b2mid: {4}\n
+      midpoint < b3mid: {5}\n
+      end zones\n
+     ",
+
+     midpoint > b1mid, midpoint > b2mid, midpoint > b3mid,  midpoint < b1mid, midpoint < b2mid, midpoint < b3mid
+  )
+
+log.info(
+     "\nBand Trends \n
+      threeUp: {0}\n
+      twoUp: {1}\n
+      oneUp: {2}\n
+      oneDown: {3}\n
+      twoDown: {4}\n
+      threeDown: {5}\n
+      end zones\n
+     ",
+
+     threeUp, twoUp, oneUp, oneDown, twoDown, threeDown
+  )
+
+log.info(
+     "\nzones \n
+      zonePlusThree: {0}\n
+      zonePlusTwo: {1}\n
+      zonePlusOne: {2}\n
+      zoneMinusOne: {3}\n
+      zoneMinusTwo: {4}\n
+      zoneMinusThree: {5}\n
+      end zones\n
+     ",
+
+     zonePlusThree, zonePlusTwo, zonePlusOne, zoneMinusOne, zoneMinusTwo, zoneMinusThree
+  )
+
+log.info(
+     "\n====== Heiken Ashi end {0} {1} ======== \n",
+
+     formattedTime, bar_index
+  )
+//#endregion------------------------ Heiken Ashi logging -------------------------------
+
+////////////////////////////////////////////////////////////////////
+
+//#endregion------------------------ Heiken Ashi -------------------------------
+
+
+
+//////////////////////// SUPERTREND ////////////////////////////////////////
+
+//#region------------------------ Supertrend -------------------------------
+
+// Code copied from:
+// SuperTrended Moving Averages by KivancOzbilgic
+
+
+base_src = input(close, title='Source')
+// ma_type = input.string(title='Moving Average Type', defval='EMA', options=['SMA', 'EMA', 'WMA', 'DEMA', 'TMA', 'VAR', 'WWMA', 'ZLEMA', 'TSF', 'HULL', 'TILL'])
+ma_length = input.int(100, 'Moving Average Length', minval=1)
+atr_length = input(title='ATR Period', defval=10)
+atr_multiplier = input.float(title='ATR Multiplier', step=0.1, defval=0.5)
+// changeATR = input(title='Change ATR Calculation Method ?', defval=true)
+// showsignals = input(title='Show Buy/Sell Signals ?', defval=false)
+// highlighting = input(title='Highlighter On/Off ?', defval=true)
+// colorup = input.color(defval = color.new(color.blue, 60), title = "ColorU", inline = 'color')
+// colordown = input.color(defval = color.new(color.yellow, 60), title = "ColorD", inline = 'color')
+
+
+// Chart timeframe supertrend
+[up, dn, trend, longFillLine, shortFillLine, closeCrossesAboveDnLine, closeCrossesBelowUpLine] = rbLib.rb_supertrend(base_src, ma_length, atr_length, atr_multiplier)
+
+upLinePlot = plot(up, "up", color=color.blue, force_overlay = true)
+dnLinePlot = plot(dn, "dn", color=color.yellow, force_overlay = true)
+
+upPlot = plot(trend == 1 ? up : na, title='trendUp', color=color.new(color.blue, 100), linewidth=1, style=plot.style_linebr, force_overlay = true)
+dnPlot = plot(trend == 1 ? na : dn, title='trendDn',  color=color.new(color.yellow, 100), style=plot.style_linebr, linewidth=1, force_overlay = true)
+
+// longFillLinePlot = plot(longFillLine, "longFillLinePlot", force_overlay = true)
+// shortFillLinePlot = plot(shortFillLine, "shortFillLinePlot", force_overlay = true)
+
+// fill(longFillLinePlot, dnLinePlot, title='longFillLineFill', color=color.blue)
+// fill(upLinePlot, dnLinePlot, title='middleFill', color=color.white)
+// fill(shortFillLinePlot, upLinePlot, title='shortFillLineFill', color=color.yellow)
+
+
+// Higher timeframe supertrend using htfC as source and htf_multiplier 
+
+htf_multiplier = timeframe.in_seconds(higher_timeframe) / timeframe.in_seconds()
+[htfUp, htfDn, htfTrend, htfLongFillLine, htfShortFillLine, htfCloseCrossesAboveDnLine, htfCloseCrossesBelowUpLine] = rbLib.rb_supertrend(htfC, ma_length * htf_multiplier, atr_length * htf_multiplier, atr_multiplier)
+
+htfUpLinePlot = plot(htfUp, "htfUp", color=color.blue, force_overlay = true)
+htfDnLinePlot = plot(htfDn, "htfDn", color=color.yellow, force_overlay = true)
+
+htfUpPlot = plot(htfTrend == 1 ? htfUp : na, title='htfTrendUp', color=color.new(color.green, 100), linewidth=1, style=plot.style_linebr, force_overlay = true)
+htfDnPlot = plot(htfTrend == 1 ? na : htfDn, title='htfTrendDn', style=plot.style_linebr, linewidth=1, color=color.new(color.red, 100), force_overlay = true)
+
+// htfLongFillLinePlot = plot(htfLongFillLine, "htfLongFillLinePlot", force_overlay = true)
+// htfShortFillLinePlot = plot(htfShortFillLine, "htfShortFillLinePlot", force_overlay = true)
+
+// fill(htfLongFillLinePlot, htfDnLinePlot, title='htfLongFillLineFill', color=color.blue)
+// fill(htfUpLinePlot, htfDnLinePlot, title='htfMiddleFill', color=color.white)
+// fill(htfShortFillLinePlot, htfUpLinePlot, title='htfShortFillLineFill', color=color.yellow)
+
+
+//////////////////////// END SUPERTREND ////////////////////////////////////////
+//#endregion------------------------ Supertrend -------------------------------
+
+
+//#region-------------------- DONCHIAN CHANNELS ----------------------------------
+//////////////////////// DONCHIAN CHANNELS ////////////////////////////////////////
+
+
+//////// INPUTS ////////////
+
+length = input.int(3, minval = 1)
+horzOffset = input.int(0)
+vertOffset = input.float(0.05)
+longColor = input.color(color.blue, "Long color")
+shortColor = input.color(color.yellow, "Short color")
+midpointColor = input.color(color.black, "Midpoint color")
+
+/////// FUNCTION CALL //////////////
+
+[
+ lower,
+ upper,
+ dcMidpoint,
+ longPullback,
+ longPullbackState,
+//  longRetrace,
+//  longRetraceState,
+ longBreakout,
+ shortPullback,
+ shortPullbackState,
+//  shortRetrace,
+//  shortRetraceState,
+ shortBreakout
+//  ] = rbLib.rb_donchian_channels(length)
+ ] = rbLib.rb_donchian_channels(open, high, low, close, length, true)
+
+
+/////// PLOTS /////////////
+// Plot colors
+upperBandColor = color.white
+lowerBandColor = color.white
+dcMidpointBaseColor = color.black
+longPullbackColor = shortColor
+shortPullbackColor = longColor
+longBreakoutColor = longColor
+shortBreakoutColor = shortColor
+
+upperColor = longPullback ? longPullbackColor : longBreakout ? longBreakoutColor : upperBandColor
+lowerColor = shortPullback ? shortPullbackColor : shortBreakout ? shortBreakoutColor : lowerBandColor
+
+// dcMidpoint
+// plot(dcMidpoint, "dcMidpoint", color = dcMidpointBaseColor, style = plot.style_stepline, linewidth = 3, offset = horzOffset, force_overlay = true)
+
+// upper
+u = plot(upper, "Upper", color = upperColor, style = plot.style_stepline, linewidth = 3, offset = horzOffset, force_overlay = true)
+
+// lower
+l = plot(lower, "Lower", color = lowerColor, style = plot.style_stepline, linewidth = 3, offset = horzOffset, force_overlay = true)
+
+// fill
+fill(u, l, color = color.rgb(33, 150, 243, 95), title = "Background")
+
+// plot(longBreakout ? lower - vertOffset : na, "long breakout", color = color.blue, style = plot.style_cross, linewidth = 4, force_overlay = true)
+// plot(longRetrace ? lower - vertOffset * 1.5 : na, "long retrace", color = color.purple, style = plot.style_cross, linewidth = 4)
+// plot(longRetraceState ? lower - vertOffset * 2 : na, "long retrace state", color = color.red, style = plot.style_cross, linewidth = 4)
+
+// plot(shortBreakout ? upper + vertOffset : na, "short breakout", color = color.yellow, style = plot.style_cross, linewidth = 4, force_overlay = true)
+// plot(shortRetrace ? upper + vertOffset * 1.5 : na, "short retrace", color = color.orange, style = plot.style_cross, linewidth = 4)
+// plot(shortRetraceState ? upper + vertOffset * 2 : na, "short retrace state", color = color.fuchsia, style = plot.style_cross, linewidth = 4)
+
+
+// log.info(
+//      "\n====== rb DonChans START {0} {1} ======== \n",
+
+//      formattedTime, bar_index
+//   )
+
+// log.info(
+//      "\nprice \n
+//       open: {0}\n
+//       high: {1}\n
+//       low: {2}\n
+//       close: {3}\n
+//       end price\n
+//      ",
+
+//      open, high, low, close
+//   )
+
+// log.info(
+//      "\nchannels \n
+//       upper: {0}\n
+//       dcMidpoint: {1}\n
+//       lower: {2}\n
+//       upper[1]: {3}\n
+//       closeCrossesAboveUpper[1]
+//       lower[1]: {4}\n
+//       closeCrossesBelowLower[1]
+//       end channels\n
+//      ",
+
+//      upper, dcMidpoint, lower, upper[1], ta.crossover(close, upper[1]), lower[1], ta.crossunder(close, lower[1])
+//   )
+
+// log.info(
+//      "\nretrace breakouts \n
+//       longRetrace: {0}\n
+//       longRetraceState: {1}\n
+//       longPullback: {2}\n
+//       longBreakout: {3}\n
+//       shortRetrace: {4}\n
+//       shortRetraceState: {5}\n
+//       shortPullback: {6}\n
+//       shortBreakout: {7}\n
+//       end zones\n
+//      ",
+
+//      longRetrace, longRetraceState, longPullback, longBreakout, shortRetrace, shortRetraceState, shortPullback, shortBreakout
+//   )
+
+// log.info(
+//      "\n====== rb DonChans END {0} {1} ======== \n",
+
+//      formattedTime, bar_index
+//   )
+
+
+
+//////////////////////// END DONCHIAN CHANNELS ////////////////////////////////////////
+//#endregion-------------------- DONCHIAN CHANNELS ----------------------------------
+
+
+//#region-------------------- DI +/- ----------------------------------
+
+//////////////////////// DI +/- ////////////////////////////////////////
+
+adx_length = input.int(14, "ADX length")
+upper_thresh = input.int(10, "Upper threshold")
+lower_thresh = input.int(-10, "Lower threshold")
+upColor50 = color.new(upColor, 50)
+dnColor50 = color.new(dnColor, 50)
+
+[diPlus, diMinus, dx, adx, diHist, closeTimeMatch, htf_multiplier2, adjustedAdxLength, fastCrossesZero, fastCrossesAboveZero, fastCrossesBelowZero, fastCrossesAboveUpperThresh, fastCrossesBelowLowerThresh, fastCrossesBelowUpperThresh, fastCrossesAboveLowerThresh, upBreak, dnBreak] = rbLib.rb_di_plus_minus(adx_length, chart_tf_seconds, high, low, close, time_close)
+[htfDiPlus, htfDiMinus, htfDx, htfAdx, htfDiHist, htfCloseTimeMatch, htfMultiplier, htfAdjustedAdxLength, htfFastCrossesZero, htfFastCrossesAboveZero, htfFastCrossesBelowZero, htfFastCrossesAboveUpperThresh, htfFastCrossesBelowLowerThresh, htfFastCrossesBelowUpperThresh, htfFastCrossesAboveLowerThresh, htfUpBreak, htfDnBreak] = rbLib.rb_di_plus_minus(adx_length, htf_seconds, htfH, htfL, htfC, htfTC)
+
+
+
+
+////////// PLOTS //////////////////
+// colors
+diHistColor = diHist > 0 ? dnColor : upColor
+htfDiHistColor = htfDiHist > 0 ? upColor : dnColor
+// htfDiHistColor = htfDiHist > 0 ? upColor50 : dnColor50
+
+// DI lines 
+// Note: showing all just looks like chaos...
+// plot(diPlus, "diPlus", color=color.blue, style = plot.style_stepline, linewidth = 3)
+// plot(diMinus, "diMinus", color=color.yellow, style = plot.style_stepline, linewidth = 3)
+// plot(htfDiPlus, "htfDiPlus", color=color.blue, style = plot.style_stepline, linewidth = 3)
+// plot(htfDiMinus, "htfDiMinus", color=color.yellow, style = plot.style_stepline, linewidth = 3)
+
+
+// histogram
+diHistPlot = plot(diHist, title = "DI Histogram", color=diHistColor, style = plot.style_histogram, linewidth = 3, editable = true)
+// htfDiHistPlot = plot(htfDiHist, title = "HTF DI Histogram", color=htfDiHistColor, style = plot.style_columns, editable = true)
+
+zeroLine = plot(0, "Zero line", color=color.white, style = plot.style_line, linewidth = 2)
+hline(upper_thresh, color=color.white, title="DI+ threshold", linestyle = hline.style_solid)
+hline(lower_thresh, color=color.white, title="DI- threshold", linestyle = hline.style_solid)
+// fill(zeroLine, diHist, DIHistColor, title="DIHist fill")
+
+
+
+//////////// CROSSOVERS /////////////
+
+// plot(fastCrossesAboveLowerThresh ? diHist : na, "DI cross above lower", style = plot.style_circles, color=dnColor, linewidth = 3)
+// plot(fastCrossesAboveZero ? diHist : na, "DI cross above zero", style = plot.style_cross, color=dnColor, linewidth = 3)
+// plot(fastCrossesAboveUpperThresh ? diHist : na, "DI cross above upper", style = plot.style_circles, color=dnColor, linewidth = 3)
+
+// plot(fastCrossesBelowUpperThresh ? diHist : na, "DI cross below upper", style = plot.style_circles, color=upColor, linewidth = 3)
+// plot(fastCrossesBelowZero ? diHist : na, "DI cross below zero", style = plot.style_cross, color=upColor, linewidth = 3)
+// plot(fastCrossesBelowLowerThresh ? diHist : na, "DI cross below lower", style = plot.style_circles, color=upColor, linewidth = 3)
+
+// plot(upBreak ? diHist : na, "upBreak", style = plot.style_cross, color=color.green, linewidth = 3)
+// plot(dnBreak ? diHist : na, "dnBreak", style = plot.style_cross, color=color.red, linewidth = 3)
+
+
+
+//////////////////////// END DI +/- ////////////////////////////////////////
+//#endregion-------------------- DI +/- ----------------------------------
+
+//#region------------------------ Trading Signals -------------------------------
+///////////////////////// TRADING SIGNALS CODE ////////////////////////
+
+
+// Trend entry
+// Supertrend filters
+// htfSupertrend = up
+// ctfSupertrend = up
+
+ctfLongTrend = trend == 1
+longTrend = trend == 1 and htfTrend == 1
+trendOverlap = up < htfDn and dn > htfDn
+
+ctfShortTrend = trend == -1
+shortTrend = trend == 1 and htfTrend == -1
+
+plot(trendOverlap == 1 ? 45 : na, "trendOverlap", style = plot.style_cross, linewidth = 3, color = color.fuchsia)
+plot(htfTrend == 1 ? 50 : na, "stHtfLong", style = plot.style_cross, linewidth = 3, color = color.green)
+plot(trend == 1 ? 55 : na, "stCtfLong", style = plot.style_cross, linewidth = 3, color = color.red)
+plot(longTrend ? 60 : na, "stLongTrend", style = plot.style_cross, linewidth = 3)
+
+// smHA bands filters
+// smHA zone = zonePlusTwo or zonePlusOne
+// smHAColor = zonePlusThree ? color.blue : zonePlusTwo ? color.teal : zonePlusOne ? color.silver : zoneMinusOne ? color.white : zoneMinusTwo ? color.fuchsia : zoneMinusThree ? color.yellow : color.navy
+
+plot(threeUp ? 90 : na, "threeUp", style = plot.style_circles, linewidth = 3, color = color.blue)
+plot(twoUp ? 85 : na, "twoUp", style = plot.style_circles, linewidth = 3, color = color.teal)
+plot(oneUp ? 80 : na, "oneUp", style = plot.style_circles, linewidth = 3, color = color.silver)
+plot(oneDown ? 75 : na, "oneDown", style = plot.style_circles, linewidth = 3, color = color.white)
+plot(twoDown ? 70 : na, "twoDown", style = plot.style_circles, linewidth = 3, color = color.fuchsia)
+plot(threeDown ? 65 : na, "threeDown", style = plot.style_circles, linewidth = 3, color = color.yellow)
+
+longHaZonePullback = zonePlusTwo or zonePlusOne
+plot(zonePlusThree ? 90 : na, "zonePlusThree", style = plot.style_cross, linewidth = 3, color = color.blue)
+plot(zonePlusTwo ? 85 : na, "pulzonePlusTwolback", style = plot.style_cross, linewidth = 3, color = color.teal)
+plot(zonePlusOne ? 80 : na, "zonePlusOne", style = plot.style_cross, linewidth = 3, color = color.silver)
+plot(zoneMinusOne ? 75 : na, "zoneMinusOne", style = plot.style_cross, linewidth = 3, color = color.white)
+plot(zoneMinusTwo ? 70 : na, "zoneMinusTwo", style = plot.style_cross, linewidth = 3, color = color.fuchsia)
+plot(zoneMinusThree ? 65 : na, "zoneMinusThree", style = plot.style_cross, linewidth = 3, color = color.yellow)
+// plot(longHaZonePullback ? 95 : na, "longHaZonePullback", style = plot.style_cross, linewidth = 3, color = color.navy)
+
+
+// donchian channel filters
+plot(longPullbackState ? 110 : na, "dc longPullbackState", style = plot.style_cross, linewidth = 3, color = color.yellow)
+plot(longBreakout ? 115 : na, "dc longBreakout", style = plot.style_cross, linewidth = 3, color = color.blue)
+
+// smHA band crosses
+plot(closeCrossesAboveFast1 ? 125 : na, "closeCrossesAboveFast1", style = plot.style_circles, linewidth = 3, color = color.blue)
+plot(closeCrossesAboveFast2 ? 130 : na, "closeCrossesAboveFast2", style = plot.style_circles, linewidth = 3, color = color.red)
+plot(closeCrossesAboveSlow1 ? 135 : na, "closeCrossesAboveSlow1", style = plot.style_circles, linewidth = 3, color = color.green)
+
+// DI +/- filters
+plot(fastCrossesAboveLowerThresh ? 145 : na, "DI cross above lower", style = plot.style_cross, color=color.blue, linewidth = 3)
+plot(fastCrossesAboveZero ? 150 : na, "DI cross above zero", style = plot.style_cross, color=color.yellow, linewidth = 3)
+plot(fastCrossesAboveUpperThresh ? 155 : na, "DI cross above upper", style = plot.style_cross, color=color.fuchsia, linewidth = 3)
+plot(upBreak ? 160 : na, "DI upBreak", style = plot.style_cross, color=color.green, linewidth = 3)
+
+// plot(fastCrossesBelowUpperThresh ? diHist : na, "DI cross below upper", style = plot.style_circles, color=dnColor, linewidth = 3)
+// plot(fastCrossesBelowZero ? diHist : na, "DI cross below zero", style = plot.style_cross, color=dnColor, linewidth = 3)
+// plot(fastCrossesBelowLowerThresh ? diHist : na, "DI cross below lower", style = plot.style_circles, color=dnColor, linewidth = 3)
+// plot(dnBreak ? diHist : na, "dnBreak", style = plot.style_cross, color=color.red, linewidth = 3)
+
+
+// LONG WINDOW OPEN
+// supertrend
+// long on both timeframes
+supertrendLongWindowOpen = trend == 1 and htfTrend == 1
+plot(supertrendLongWindowOpen ? 180 : na, "supertrendLongWindowOpen", style = plot.style_cross, color=color.green, linewidth = 3)
+
+// Heiken Ashi long pullback
+// Slow1 must be up and fast1 must be down so twoDown or oneDown or oneUp or twoUp
+// HA not threeDown
+heikenAshiLongWindowOpen = twoDown or oneDown or oneUp or twoUp
+plot(heikenAshiLongWindowOpen ? 185 : na, "heikenAshiLongWindowOpen", style = plot.style_cross, color=color.blue, linewidth = 3)
+
+
+// LONG ENTRIES
+// long from Heiken Ashi pullback
+longHeikenAshiEntry = supertrendLongWindowOpen and (heikenAshiLongWindowOpen or heikenAshiLongWindowOpen[1]) and (closeCrossesAboveFast1 or closeCrossesAboveFast2 or closeCrossesAboveSlow1)
+plot(longHeikenAshiEntry ? 190 : na, "longHeikenAshiEntry", style = plot.style_cross, color=color.yellow, linewidth = 3)
+
+
+
+// ENTRIES USING CHART TIMEFRAME SUPERTREND WITHOUT HTF SUPERTREND
+// donchianChannel trigger
+stDonLongEntry = ctfLongTrend and longBreakout
+plot(stDonLongEntry ? 200 : na, "stDonLongEntry", style = plot.style_circles, color=color.blue, linewidth = 3)
+
+// REVERSAL ENTRIES
+// Trend down with long above slow 1 HA line
+trendDownLongEntryAboveSlowOne = ctfShortTrend and (oneDown or twoDown or threeUp) and longBreakout
+plot(trendDownLongEntryAboveSlowOne ? 205 : na, "trendDownLongEntryAboveSlowOne", style = plot.style_cross, color=color.blue, linewidth = 3)
+
+
+// pullback detectors
+
+// trendUp = trend == 1
+// trendDn = trend == -1
+
+// upBar = open > close
+// dnBar = close > open
+
+// fastHAUp = b1o < b1c
+// fastHADn = b1o > b1c
+
+// fastHaStatus = fastHAUp ? 1 : fastHADn ? -1 : 0
+
+// var leftBars = 5
+// var rightBars = 2
+// var verticalOfset = 0.1
+
+// recentPivotHigh = ta.pivothigh(leftBars, rightBars)
+// recentPivotLow = ta.pivotlow(2,2)
+
+// // // for uptrend
+// twoClosesBelowPivotHigh = na(recentPivotHigh) == false and close[1] < recentPivotHigh and close[2] < recentPivotHigh
+// // // for downtrend
+// twoClosesAbovePivotLow = na(recentPivotLow) == false and close[1] > recentPivotLow and close[2] > recentPivotLow
+
+// plot(trend, "trend")
+// plot(fastHaStatus, "fastHAStatus")
+// plot(recentPivotHigh + verticalOfset, "recentPivotHigh", color = color.white, style = plot.style_cross, linewidth = 4, offset = -rightBars)
+// plot(recentPivotLow - verticalOfset, "recentPivotLow", color = color.white, style = plot.style_cross, linewidth = 4, offset = -rightBars)
+
+
+///////// LOGGING //////////////////
+
+// log.info(
+//      "\n====== global START {0} {1} ======== \n
+//       trendUp: {2}\n
+//       trendDn: {3}\n
+//       fastHAUp: {4}\n
+//       fastHADn: {5}\n
+//       recentPivotHigh: {6}\n
+//       recentPivotLow: {7}\n
+//       twoClosesBelowPivotHigh: {8}\n
+//       twoClosesAbovePivotLow: {9}\n
+//       ====global END {0} {1} ===============\n
+//      ",
+
+//      formattedTime, bar_index, trendUp, trendDn, fastHAUp, fastHADn, recentPivotHigh, recentPivotLow, twoClosesBelowPivotHigh, twoClosesAbovePivotLow
+//   )
+// series float pullbackPlotValue = na
+
+// TWO BAR
+
+// uptrend:
+// trendUp = true AND
+// trendDn = false AND
+// recentPivotHigh exists AND
+// close of two most recent bars is lower than the recent pivot high
+// if true, set the value as current bar low - 20 cents
+// if false, set the value as na
+// plot as a dot below low of bar
+// don't show the plot if HA touch or HA reversal is true
+// series bool uptrendTwoBarPullback = false
+// uptrendTwoBarPullback := trendUp == true and trendDn == false and twoClosesBelowPivotHigh == true
+// series float twoBarPullbackPlotValue = na
+// twoBarPullbackPlotValue := uptrendTwoBarPullback == true ? low - .2 : na
+
+// downtrend
+// trendDn = true AND 
+// trendUp = false AND 
+// recentPivotLow exists AND
+// close of two most recent bars is higherer than the recent pivot low
+// if true, set the value as current bar high + 20 cents
+// if false, set the value as na
+// plot as a dot above high of bar
+// don't show the plot if HA touch or HA reversal is true
+// series bool downtrendTwoBarPullback = false
+// downtrendTwoBarPullback := trendDn == true and trendUp == false and twoClosesAbovePivotLow == true
+// twoBarPullbackPlotValue := downtrendTwoBarPullback == true ? high + .2 : na
+// plot(twoBarPullbackPlotValue, color = color.white, linewidth = 3, style = plot.style_circles)
+
+// TOUCH OF FAST HA LINE
+
+// uptrend:
+// uptrendTwoBarPullback = true AND
+// downtrendTwoBarPullback =  AND
+// low of current bar is less than fast HA high
+// if true, set the value as current bar low - 20 cents
+// if false, set the value as na
+// plot as a cross below low of bar
+// don't show the plot if HA reversal is true
+// series bool uptrendFastHATouch = false
+// uptrendFastHATouch := uptrendTwoBarPullback == true and low < b1h
+// series float fastHATouchPlotValue = na
+// fastHATouchPlotValue := uptrendFastHATouch == true ? low - .2 : na
+
+// downtrend:
+// downtrendTwoBarPullback = true AND
+// uptrendTwoBarPullback = false AND
+// high of current bar is greater than fast HA low
+// if true, set the value as current bar high + 20 cents
+// if false, set the value as na
+// plot as a cross above high of bar
+// don't show the plot if HA reversal is true
+// series bool downtrendFastHATouch = false
+// downtrendFastHATouch := downtrendTwoBarPullback == true and high > b1l
+// fastHATouchPlotValue := downtrendFastHATouch == true ? high + .2 : na
+// plot(fastHATouchPlotValue, color = color.yellow, linewidth = 3, style = plot.style_cross)
+
+
+// FAST HA LINE REVERSAL
+// uptrend:
+// trendUp = true
+// fastHADn = true
+// if true, set the value as current bar low - 20 cents
+// if false, set the value as na
+// plot as a cross below low of bar
+// series bool uptrendFastHALineReversal = false
+// uptrendFastHALineReversal := trendUp == true and fastHADn == true
+// series float fastHALineReversalPlotValue = na
+// fastHALineReversalPlotValue := uptrendFastHALineReversal == true ? low - .2 : na
+
+// downtrend
+// trendDn = true
+// fastHAUp = true
+// if true, set the value as current bar high + 20 cents
+// if false, set the value as na
+// plot as a cross above high of bar
+// series bool downtrendFastHALineReversal = false
+// downtrendFastHALineReversal := trendDn == true and fastHAUp == true
+// fastHALineReversalPlotValue := downtrendFastHALineReversal == true ? high + .2 : na
+// plot(fastHALineReversalPlotValue, color = color.green, linewidth = 3, style = plot.style_cross)
+
+// plot(pullbackPlotValue, color = color.fuchsia, linewidth = 6, style = plot.style_cross)
+
+//#endregion------------------------ -------------------------------
+/////////////////////////////////////////////////////////
+
+
+log.info(
+     "\n********************* GLOBAL END {0} {1} ************* \n",
+     // "\n************************************************** \n",
+
+     formattedTime, bar_index
+  )

@@ -1,0 +1,154 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © rinebob
+
+//@version=5
+indicator("rb Supertrend", overlay = true, timeframe = '', timeframe_gaps = false)
+
+import rinebob/rb_TA_lib/14 as rbLib
+
+plot(bar_index, "Bar index", display = display.data_window)
+
+// INPUTS
+
+base_src = input(close, title='Source')
+ma_length = input.int(100, 'Moving Average Length', minval=1)
+atr_length = input(title='ATR Period', defval=10)
+atr_multiplier = input.float(title='ATR Multiplier', step=0.1, defval=0.5)
+higher_timeframe = input.timeframe('3', "Higher timeframe")
+
+/////// HIGHER TIMEFRAME DATA REQUEST /////////////////////////
+
+// function to request higher time frame data without repainting
+requestTimeFrame(timeframe, expression) =>
+    request.security(syminfo.tickerid, timeframe, expression, lookahead=barmerge.lookahead_on)
+
+htfO         = requestTimeFrame(higher_timeframe, open)
+htfH         = requestTimeFrame(higher_timeframe, high)
+htfL         = requestTimeFrame(higher_timeframe, low)
+htfC         = requestTimeFrame(higher_timeframe, close)
+htfTC        = requestTimeFrame(higher_timeframe, time_close)
+
+
+/////////////////////// CALCULATIONS ////////////////////////////
+separation = 0.2
+// Chart timeframe supertrend
+[up, dn, trend,longFillLine, shortFillLine, closeCrossesAboveDnLine, closeCrossesBelowUpLine] = rbLib.rb_supertrend(base_src, ma_length, atr_length, atr_multiplier)
+
+// Higher timeframe supertrend using htfC as source and htf_multiplier 
+htf_multiplier = timeframe.in_seconds(higher_timeframe) / timeframe.in_seconds()
+[htfUp, htfDn, htfTrend, htfLongFillLine, htfShortFillLine, htfCloseCrossesAboveDnLine, htfCloseCrossesBelowUpLine] = rbLib.rb_supertrend(htfC, ma_length * htf_multiplier, atr_length * htf_multiplier, atr_multiplier)
+
+///////////////// PLOTS /////////////////////
+// Chart Timeframe
+// upper and lower atr bands
+upLinePlot = plot(up, "upLinePlot", color=color.blue)
+dnLinePlot = plot(dn, "dnLinePlot", color=color.yellow)
+
+// Plot values
+upPlot = plot(trend == 1 ? up : na, title='upPlot', color=color.new(color.blue, 100), linewidth=1, style=plot.style_linebr)
+dnPlot = plot(trend == 1 ? na : dn, title='dnPlot',  color=color.new(color.yellow, 100), style=plot.style_linebr, linewidth=1)
+
+// source plots for region shading
+longFillLinePlot = plot(longFillLine, "longFillLinePlot", display = display.data_window)
+shortFillLinePlot = plot(shortFillLine, "shortFillLinePlot", display = display.data_window)
+
+// outputs the region shading
+fill(longFillLinePlot, dnLinePlot, title='longFillLineFill', color=color.blue)
+fill(upLinePlot, dnLinePlot, title='middleFill', color=color.white)
+fill(shortFillLinePlot, upLinePlot, title='shortFillLineFill', color=color.yellow)
+
+// Higher Timeframe
+htfUpLinePlot = plot(htfUp, "htfUpLinePlot", color=color.blue)
+htfDnLinePlot = plot(htfDn, "htfDnLinePlot", color=color.yellow)
+
+htfUpPlot = plot(htfTrend == 1 ? htfUp : na, title='htfUpPlot', color=color.new(color.green, 100), linewidth=1, style=plot.style_linebr)
+htfDnPlot = plot(htfTrend == 1 ? na : htfDn, title='htfDnPlot', style=plot.style_linebr, linewidth=1, color=color.new(color.red, 100))
+
+htfLongFillLinePlot = plot(htfLongFillLine, "htfLongFillLinePlot", display = display.data_window)
+htfShortFillLinePlot = plot(htfShortFillLine, "htfShortFillLinePlot", display = display.data_window)
+
+fill(htfLongFillLinePlot, htfDnLinePlot, title='htfLongFillLineFill', color=color.blue)
+fill(htfUpLinePlot, htfDnLinePlot, title='htfMiddleFill', color=color.white)
+fill(htfShortFillLinePlot, htfUpLinePlot, title='htfShortFillLineFill', color=color.yellow)
+
+// Crosses
+plot(closeCrossesAboveDnLine ? low - separation : na, "cross above down line", style = plot.style_circles, color=color.blue, linewidth = 4)
+plot(closeCrossesBelowUpLine ? high + separation : na, "cross below up line", style = plot.style_circles, color=color.yellow, linewidth = 4)
+
+plot(htfCloseCrossesAboveDnLine ? low - separation : na, "cross above htf down line", style = plot.style_cross, color=color.blue, linewidth = 4)
+plot(htfCloseCrossesBelowUpLine ? high + separation : na, "cross below htf up line", style = plot.style_cross, color=color.yellow, linewidth = 4)
+
+////////////// DIAGNOSTIC PLOTS //////////////////////
+
+// plot(ta.sma(close, 14) - separation, "timeframe trend", style = plot.style_stepline, color = trend == 1 ? color.blue : color.yellow, linewidth = 3)
+// plot(ta.sma(close, 14) - separation * 1.5, "higher timeframe trend", style = plot.style_stepline, color = htfTrend == 1 ? color.blue : color.yellow, linewidth = 3)
+
+///////// LOGGING //////////////////
+
+formattedTime = str.format_time(time, "yyyy-MM-dd HH:mm", syminfo.timezone)
+
+log.info(
+     "\n====== global START {0} {1} ======== \n",
+
+     formattedTime, bar_index
+  )
+
+log.info(
+     "\chart timeframe plots \n
+      up: {0}\n
+      dn: {1}\n
+      trend: {2}\n
+      longFillLine: {3}\n
+      shortFillLine: {4}\n
+      end zones\n
+     ",
+
+     up, dn, trend, longFillLine, shortFillLine
+  )
+
+log.info(
+     "\chart timeframe plots \n
+      htfUp: {0}\n
+      htfDn: {1}\n
+      htfTrend: {2}\n
+      htfLongFillLine: {3}\n
+      htfShortFillLine: {4}\n
+      end zones\n
+     ",
+
+     htfUp, htfDn, htfTrend, htfLongFillLine, htfShortFillLine
+  )
+
+// log.info(
+//      "\ups \n
+//       threeUp: {0}\n
+//       twoUp: {1}\n
+//       oneUp: {2}\n
+//       oneDown: {3}\n
+//       twoDown: {4}\n
+//       threeDown: {5}\n
+//       end ups\n
+//      ",
+
+//      threeUp, twoUp, oneUp, oneDown, twoDown, threeDown
+//   )
+
+// log.info(
+//      "\nzones \n
+//       zonePlusThree: {0}\n
+//       zonePlusTwo: {1}\n
+//       zonePlusOne: {2}\n
+//       zoneMinusOne: {3}\n
+//       zoneMinusTwo: {4}\n
+//       zoneMinusThree: {5}\n
+//       end zones\n
+//      ",
+
+//      zonePlusThree, zonePlusTwo, zonePlusOne, zoneMinusOne, zoneMinusTwo, zoneMinusThree
+//   )
+
+log.info(
+     "\n====== global END {0} {1} ======== \n",
+
+     formattedTime, bar_index
+  )

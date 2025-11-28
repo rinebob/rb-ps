@@ -1,0 +1,293 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © rinebob
+
+//@version=5
+// indicator("rb Smoothed Heiken Ashi Bands", "rb SHABs", overlay=true, timeframe="", timeframe_gaps=false)
+indicator("rb smHA", "rb sMHA", timeframe="", timeframe_gaps=false)
+
+import rinebob/rb_TA_lib/14 as rbLib
+
+plot(bar_index, "Bar index", display = display.data_window, precision = 0)
+
+//////////////////////// HEIKEN ASHI BANDS ////////////////////////////////////////
+
+//#region------------------------ Heiken Ashi -------------------------------
+
+
+// Set of four smoothed Heiken Ashi bands
+// Two of the bands are in the chart timeframe
+// The other two bands are in a higher chart timeframe, typically the chart timeframe x 3
+// Example - chart timeframe = 5 min, other two bands timeframe = 15 min
+// Heiken Ashi code obtained from library TAExt.heiken_ashi by Adam Wallner
+
+// TAExt.heiken_ashi library uses inputs for before/after smoothing length and MA type 
+// I examined all the various MA types and EMA appears to work best for my use case
+// In my charts I use three or four bands with the following settings:
+// band 1 = smooth length 5 chart timeframe
+// band 2 = smooth length 10 chart timeframe
+// band 3 = smooth length 5 timeframe = 3x chart timeframe
+// band 4 = smooth length 10 timeframe = 3x chart timeframe
+// Note: sometimes I hide band 4
+
+// I am only offering the user to change the fast and slow smoothing lengths
+// I am hard-coding the MA type as EMA
+
+//
+// User inputs from TAExt.heiken_ashi:
+//
+// ha_smooth_length = input.int(5, "Smooth Length", minval=1, group="HA Bands")
+ha_smooth_length_fast = input.int(5, "Fast length", minval=1, group="HA Bands")
+// ha_smooth_ma_type = input.string('EMA', 'MA Type', options=['SMA', 'EMA', 'WMA', "VWMA", "RMA", "DEMA", "TEMA", "ZLEMA", "HMA", "ALMA", "LSMA", "SWMA", "SMMA", "JMA", "DONCHIAN", "ATRWSMA", "ATRWEMA", "ATRWRMA", "ATRWWMA"], group="Before HA")
+// ha_after_smooth_length = input.int(5, "After Smooth Length", minval=1, group="HA Bands")      
+ha_smooth_length_slow = input.int(10, "Slow length", minval=1, group="HA Bands")      
+// ha_after_smooth_ma_type = input.string('EMA', 'After MA Type', options=['SMA', 'EMA', 'WMA', "VWMA", "RMA", "DEMA", "TEMA", "ZLEMA", "HMA", "ALMA", "LSMA", "SWMA", "SMMA", "JMA", "DONCHIAN", "ATRWSMA", "ATRWEMA", "ATRWRMA", "ATRWWMA"], group="After HA")
+higher_timeframe = input.timeframe('3', "Higher timeframe", group="HA Bands")      
+// htf_multiplier = input.int(3, "HTF multiplier", group="HA Bands")      
+
+
+//
+// Calculations for each band
+// Nomenclature: 
+// b1o/b1h/b1l/b1c = band one o h l c
+// b2o/b2h/b2l/b2c = band two o h l c
+// etc.
+//
+
+// Moving average type - hard-coded as EMA
+var MA_TYPE = 'EMA'
+
+// BAND COLORS
+color color_blue = #0000FF
+color color_yellow = #FFFF00
+color color_black = #000000
+color color_white = #FFFFFF
+
+// Setting long trend band color = yellow to contrast with blue supertrend fill
+// Setting short trend band color = blue to contrast with yellow supertrend fill
+upColor = color_yellow
+dnColor = color_blue
+
+
+// function to request higher time frame data without repainting
+requestTimeFrame(timeframe, expression) =>
+    request.security(syminfo.tickerid, timeframe, expression, lookahead=barmerge.lookahead_on)
+
+htfO         = requestTimeFrame(higher_timeframe, open)
+htfH         = requestTimeFrame(higher_timeframe, high)
+htfL         = requestTimeFrame(higher_timeframe, low)
+htfC         = requestTimeFrame(higher_timeframe, close)
+htfTC        = requestTimeFrame(higher_timeframe, time_close)
+
+// Bands 1 and 2
+
+[b1o, b1h, b1l, b1c, b1m, b1Up, b1Dn, b1oo, b1hh, b1ll, b1cc, b1mm, b1HtfUp, b1HtfDn, closeCrossesAboveFast1, closeCrossesBelowFast1, closeTimeMatch1] = rbLib.htf_heiken_ashi(
+     smooth_length=ha_smooth_length_fast, after_smooth_length=ha_smooth_length_fast,
+     higher_timeframe=timeframe.period,
+     src_open=htfO, src_close=htfC, src_high=htfH, src_low=htfL, htf_close_time=htfTC
+     )
+
+[b2o, b2h, b2l, b2c, b2m, b2Up, b2Dn, b2oo, b2hh, b2ll, b2cc, b2mm, b2HtfUp, b2HtfDn, closeCrossesAboveFast2, closeCrossesBelowFast2, closeTimeMatch2] = rbLib.htf_heiken_ashi(
+     smooth_length=ha_smooth_length_slow, after_smooth_length=ha_smooth_length_slow, 
+     higher_timeframe=timeframe.period,
+     src_open=htfO, src_close=htfC, src_high=htfH, src_low=htfL, htf_close_time=htfTC
+     )
+
+// Fast HA bands - chart timeframe
+
+///////// UNCOMMENT TO SHOW FAST HA BANDS //////////////////
+plotcandle(b1o, b1h, b1l, b1c, title="Fast smHA", 
+     color = b1c > b1o ? upColor : dnColor, 
+     display = display.pane)
+
+plotcandle(b2o, b2h, b2l, b2c, title="Slow smHA", 
+         color = b2c > b2o ? upColor : dnColor, 
+         display = display.pane)
+
+//////////////////////////////// 
+
+
+// Bands 3 and 4
+// Using higher timeframe data in indicators is more complex
+// I found this video that goes over the principles
+// https://www.youtube.com/watch?v=AtTFSFhrLoA
+// Pine Script 101 - How to work with HIGHER TIME FRAMES by Zero Hero Trading
+// https://www.youtube.com/@ZeroHeroTrading
+// Code is here:
+// https://www.tradingview.com/script/2IPNpxZ8-Higher-Time-Frame/
+
+
+[b3o, b3h, b3l, b3c, b3m, b3Up, b3Dn, b3oo, b3hh, b3ll, b3cc, b3mm, b3HtfUp, b3HtfDn, closeCrossesAboveSlow1, closeCrossesBelowSlow1, closeTimeMatch3] = rbLib.htf_heiken_ashi(
+     smooth_length=ha_smooth_length_fast, after_smooth_length=ha_smooth_length_fast,
+     higher_timeframe=higher_timeframe,
+     src_open=htfO, src_close=htfC, src_high=htfH, src_low=htfL, htf_close_time=htfTC
+     )
+
+[b4o, b4h, b4l, b4c, b4m, b4Up, b4Dn, b4oo, b4hh, b4ll, b4cc, b4mm, b4HtfUp, b4HtfDn, closeCrossesAboveSlow2, closeCrossesBelowSlow2, closeTimeMatch4] = rbLib.htf_heiken_ashi(
+     smooth_length=ha_smooth_length_slow, after_smooth_length=ha_smooth_length_slow, 
+     higher_timeframe=higher_timeframe,
+     src_open=htfO, src_close=htfC, src_high=htfH, src_low=htfL, htf_close_time=htfTC
+     )
+
+///////// UNCOMMENT TO SHOW SLOW HA BANDS //////////////////
+
+// Smooth plot - each candle has different high/low
+// plotcandle(b3o, b3h, b3l, b3c, title="Fast HTF smHA", 
+//          color = b3c < b3o ? color_yellow : color_blue
+//          )
+
+// Jagged plot - resembles actual htf ha band.  New high/low only when time_close = htf_time_close
+plotcandle(b3oo, b3hh, b3ll, b3cc, title="Fast HTF smHA", 
+         color = b3c > b3o ? upColor : dnColor
+         )
+
+// smooth plot
+// plotcandle(b4o, b4h, b4l, b4c, title="Slow HTF smHA", 
+//          color = b4c < b4o ? color_yellow : color_blue
+//          )
+
+// jagged plot
+// plotcandle(b4oo, b4hh, b4ll, b4cc, title="Slow HTF smHA 2", 
+//          color = b4c > b4o ? upColor : dnColor
+//          )
+
+///////////////// SIGNALS / CROSSOVERS ////////////////////////
+
+// categories for different permutations of Up/down trends
+threeUp = (b1Up and b2Up and b3Up) or (b1Up and b2Dn and b3Up)
+twoUp = b1Dn and b2Up and b3Up
+oneUp = b1Dn and b2Dn and b3Up
+oneDown = b1Up and b2Up and b3Dn
+twoDown = b1Up and b2Dn and b3Dn
+threeDown = (b3Dn and b2Dn and b1Dn) or (b3Dn and b2Up and b1Dn)
+
+// Band midpoints
+// TODO: Add midpoint of band to smHA library code and export it, then replace these calcs with the midpoint output of each library function call above
+midpoint = low + (math.abs(high - low) / 2)
+b1mid = b1m
+b2mid = b2m
+// smooth
+b3mid = b3m
+// jagged
+// b3mid = b3mm
+// b4mid = b4mm
+
+// Price vs HA band zones
+zonePlusThree = (midpoint > b1mid and (oneUp or twoUp or threeUp)) or (midpoint > b3mid and (threeDown or twoDown or oneDown))
+zoneMinusThree = (midpoint < b1mid and (oneDown or twoDown or threeDown)) or (midpoint < b3mid and (oneUp or twoUp or threeUp))
+
+zonePlusTwo = ((midpoint > b2mid) and (midpoint <= b1mid)) and (twoUp or threeUp)
+zoneMinusTwo = ((midpoint < b2mid) and (midpoint >= b1mid)) and (twoDown or threeDown)
+
+zonePlusOne = (midpoint > b3mid and midpoint <= b2mid) and (oneUp or twoUp or threeUp)
+zoneMinusOne = (midpoint < b3mid and midpoint >= b2mid) and (oneDown or twoDown or threeDown)
+
+///////////////// PLOTS //////////////////
+// Band one cross over/under
+separation = 0.2
+plot(closeCrossesAboveFast1 ? low - separation : na, "cross above fast 1", style = plot.style_circles, color=color.blue, linewidth = 4)
+plot(closeCrossesBelowFast1 ? high + separation : na, "cross below fast 1", style = plot.style_circles, color=color.yellow, linewidth = 4)
+
+// Bar colors / plots
+trendColor = threeUp ? color.blue : twoUp ? color.teal : oneUp ? color.silver : oneDown ? color.white : twoDown ? color.fuchsia : threeDown ? color.yellow : color.navy
+// barcolor(trendColor)
+
+smHAColor = zonePlusThree ? color.blue : zonePlusTwo ? color.teal : zonePlusOne ? color.silver : zoneMinusOne ? color.white : zoneMinusTwo ? color.fuchsia : zoneMinusThree ? color.yellow : color.navy
+barcolor(smHAColor)
+
+////////////  DIAGNOSTIC PLOTS //////////////////////////
+
+// plots smHA band trends as color on SMA stepline
+// plot(ta.sma(close, 14) - .1, "trend color line", color=trendColor, style = plot.style_stepline, linewidth = 3)
+
+// plots zones as color on SMA stepline
+// plot(ta.sma(close, 14) - .2, "trend color line", color=smHAColor, style = plot.style_stepline, linewidth = 3)
+
+// plot(htfO, "htfO", color.white)
+// plot(htfH, "htfH", color.green)
+// plot(htfL, "htfL", color.red)
+// plot(htfC, "htfClose", color.fuchsia)
+// plot(closeMatch3, "closeTimeMatch3", display = display.data_window)
+
+// plots a cross on low/high for up/down bar
+plot(open < close ? low : high, "Up/Dn Bar", style = plot.style_cross, color= open < close ? dnColor : upColor, linewidth = 3)
+
+// price and smHA band midpoints
+plot(midpoint, "midPt", color = color.white, style = plot.style_circles, linewidth = 1)
+plot(b1mid, "b1mid", color = b1Up ? color.black : color.white, style = plot.style_circles, linewidth = 1)
+plot(b2mid, "b2mid", color = b2Up ? color.green : color.red, style = plot.style_cross, linewidth = 1)
+plot(b3mid, "b3mid", color = b3Up ? color.black : color.white, style = plot.style_circles, linewidth = 1)
+
+///////// LOGGING //////////////////
+
+formattedTime = str.format_time(time, "yyyy-MM-dd HH:mm", syminfo.timezone)
+
+log.info(
+     "\n====== START {0} {1} ======== \n",
+
+     formattedTime, bar_index
+  )
+
+log.info(
+     "\nmidpoints \n
+      midpoint: {0}\n
+      b1mid: {1}\n
+      b2mid: {2}\n
+      b3mid: {3}\n
+      end zones\n
+     ",
+
+     midpoint, b1mid, b2mid, b3mid
+  )
+
+log.info(
+     "\nmidpoint status \n
+      midpoint > b1mid: {0}\n
+      midpoint > b2mid: {1}\n
+      midpoint > b3mid: {2}\n
+      midpoint < b1mid: {3}\n
+      midpoint < b2mid: {4}\n
+      midpoint < b3mid: {5}\n
+      end zones\n
+     ",
+
+     midpoint > b1mid, midpoint > b2mid, midpoint > b3mid,  midpoint < b1mid, midpoint < b2mid, midpoint < b3mid
+  )
+
+log.info(
+     "\nBand Trends \n
+      threeUp: {0}\n
+      twoUp: {1}\n
+      oneUp: {2}\n
+      oneDown: {3}\n
+      twoDown: {4}\n
+      threeDown: {5}\n
+      end zones\n
+     ",
+
+     threeUp, twoUp, oneUp, oneDown, twoDown, threeDown
+  )
+
+log.info(
+     "\nzones \n
+      zonePlusThree: {0}\n
+      zonePlusTwo: {1}\n
+      zonePlusOne: {2}\n
+      zoneMinusOne: {3}\n
+      zoneMinusTwo: {4}\n
+      zoneMinusThree: {5}\n
+      end zones\n
+     ",
+
+     zonePlusThree, zonePlusTwo, zonePlusOne, zoneMinusOne, zoneMinusTwo, zoneMinusThree
+  )
+
+log.info(
+     "\n====== END {0} {1} ======== \n",
+
+     formattedTime, bar_index
+  )
+
+
+//#endregion------------------------ Heiken Ashi -------------------------------
+
+////////////////////////////////////////////////////////////////////

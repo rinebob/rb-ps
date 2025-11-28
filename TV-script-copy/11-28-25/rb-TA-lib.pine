@@ -1,0 +1,266 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © rinebob
+
+//@version=5
+
+// @description TODO: add library description here
+library("rb_TA_lib")
+
+//////////////////////// HEIKEN ASHI BANDS ////////////////////////////////////////
+
+//#region------------------------ Heiken Ashi -------------------------------
+
+
+//////////////////////////////////////////////////////////////////
+
+// REPLACEMENT FOR TAEXT.HEIKEN_ASHI ENABLING HIGHER TIME FRAME LINES
+
+// @function                    Heiken Ashi (Smoothed) Candle
+// @param smooth_length         Smooth length before heiken ashi calculation
+// @param smooth_ma_type        Type of smoothing MA before heiken ashi calculation
+// @param after_smooth_length   Smooth length after
+// @param after_smooth_ma_type  Smooth MA type after
+// @param timeframe             Timeframe of chart
+// @param htf_multiplier        Multiplier for higher timeframe chart (=multiple of chart timeframe)
+// @param src_open              Source of open
+// @param src_high              Source of high
+// @param src_low               Source of low
+// @param src_close             Source of close
+// @returns                     [open, high, low, close]
+export htf_heiken_ashi(simple int smooth_length = 1, 
+             simple int after_smooth_length = 1, 
+             simple string higher_timeframe = '3',
+             series float src_open = open, series float src_high = high, series float src_low = low, series float src_close = close, series int htf_close_time) =>
+
+    float haopen = na
+
+    htf_multiplier = timeframe.in_seconds(higher_timeframe) / timeframe.in_seconds()
+    int beforeLength = smooth_length * htf_multiplier
+    int afterLength = after_smooth_length * htf_multiplier
+
+    var closeTimeMatch = false
+    closeTimeMatch := time_close == htf_close_time
+
+    o = ta.ema(src_open, beforeLength)
+    h = ta.ema(src_high, beforeLength)
+    l = ta.ema(src_low, beforeLength)
+    c = ta.ema(src_close, beforeLength)
+    series float m = 0
+
+    haclose = (o + h + l + c) / 4.0
+    haopen := na(haopen[htf_multiplier]) ? (o + c) / 2 : (haopen[htf_multiplier] + haclose[htf_multiplier]) / 2
+    hahigh = math.max(h, math.max(haopen, haclose))
+    halow = math.min(l, math.min(haopen, haclose))
+    
+    o := ta.ema(haopen, afterLength)
+    h := ta.ema(hahigh, afterLength)
+    l := ta.ema(halow, afterLength)
+    c := ta.ema(haclose, afterLength)
+
+    h := o > c ? o : c
+    l := o > c ? c : o
+    m := l + (math.abs(h - l) / 2)
+
+    series float oo = 0
+    series float hh = 0
+    series float ll = 0
+    series float cc = 0
+    series float mm = 0
+
+    oo := closeTimeMatch ? o : oo[1]
+    hh := closeTimeMatch ? h : hh[1]
+    ll := closeTimeMatch ? l : ll[1]
+    cc := closeTimeMatch ? c : cc[1]
+    mm := closeTimeMatch ? m : mm[1]
+
+    hh := oo > cc ? oo : cc
+    ll := oo > cc ? cc : oo
+
+    closeCrossesAboveHA = ta.crossover(close, h)
+    closeCrossesBelowHA = ta.crossunder(close, l)
+
+    up = c > o
+    dn = o > c
+    htfUp = cc > oo
+    htfDn = oo > cc
+
+    formattedTime = str.format_time(time, "yyyy-MM-dd HH:mm", syminfo.timezone)
+
+    
+
+    // log.info(
+    //  "\n============HA fn START {0} {1} =============== \n
+    //   HTFOpen: {2}\n
+    //   HTFClose: {3}\n
+    //   time_close: {4}\n
+    //   htfTimeClose: {5}\n
+    //   time_close == htfTClose: {6}\n
+    //   ============= END {0} {1} ===============
+    //  ",
+
+    //  formattedTime, bar_index, htfO, htfC, time_close, htfTC, time_close == htfTC
+    //  )
+
+    [o, h, l, c, m, up, dn, oo, hh, ll, cc, mm, htfUp, htfDn, closeCrossesAboveHA, closeCrossesBelowHA, closeTimeMatch]
+
+
+
+
+//////////////////////////////////////////////////////////////////
+
+//#endregion------------------------ Heiken Ashi -------------------------------
+
+
+//////////////////////// SUPERTREND ////////////////////////////////////////
+
+//#region------------------------ Supertrend -------------------------------
+
+// @function supertrend
+// @param base_src            Data source for calculations
+// @param ma_length           The length of the TR smoothing
+// @param atr_length          The length of the standard deviation, used for detecting outliers
+// @param atr_multiplier      The multiplier of the standard deviation, used for detecting outliers
+// @returns                   trend, upPlot, dnPlot, longFillLine, shortFillLine
+export rb_supertrend(series float base_src = close, simple int ma_length = 100, simple int atr_length = 10, simple float atr_multiplier = 0.5) =>
+    ma = ta.ema(base_src, ma_length)
+    atr = ta.sma(ta.tr, atr_length)
+
+    up = ma - atr_multiplier * atr
+    up1 = nz(up[1], up)
+    up := close[1] > up1 ? math.max(up, up1) : up
+     
+    dn = ma + atr_multiplier * atr
+    dn1 = nz(dn[1], dn)
+    dn := close[1] < dn1 ? math.min(dn, dn1) : dn
+
+    trend = 1
+    trend := nz(trend[1], trend)
+    trend := trend == -1 and close > dn1 ? 1 : trend == 1 and close < up1 ? -1 : trend
+
+    upVal = close >= open ? close : open
+    dnVal = close < open ? close : open
+    fillpoint = trend == 1 ? dnVal : upVal
+
+    longFillLine = fillpoint > dn ? fillpoint : na
+    shortFillLine = fillpoint < up ? fillpoint : na
+
+    closeCrossesAboveDnLine = ta.crossover(close, dn) and trend[1] == -1
+    closeCrossesBelowUpLine = ta.crossunder(close, up) and trend[1] == 1
+
+    [up, dn, trend, longFillLine, shortFillLine, closeCrossesAboveDnLine, closeCrossesBelowUpLine]
+
+////////// END SUPERTREND ////////////////////
+//#endregion------------------------ Supertrend -------------------------------
+
+
+//#region------------------------ Donchian Channels -------------------------------
+
+//////////////////////// DONCHIAN CHANNELS ////////////////////////////////////////
+
+// export rb_donchian_channels(series float src_upper, series float src_lower, simple int length) =>
+export rb_donchian_channels(series float src_open, series float src_high, series float src_low, series float src_close, simple int length, simple bool use_body) =>
+    bodyHigh = src_open < src_close ? src_close : src_open
+    bodyLow = src_open > src_close ? src_close : src_open
+
+    highToUse = use_body ? bodyHigh : src_high
+    lowToUse = use_body ? bodyLow : src_low
+
+    // upper = ta.highest(high, length)
+    // lower = ta.lowest(low, length)
+    upper = ta.highest(highToUse, length)
+    lower = ta.lowest(lowToUse, length)
+    midpoint = math.avg(upper, lower)
+    // upper =  ta.highest(src_upper, length)
+    // lower =  ta.lowest(src_lower, length)
+
+    // midpoint =  math.avg(upper, lower)
+
+    // Pullbacks and breakouts
+    series bool longPullback = false
+    series bool longPullbackState = false
+    series bool longRetrace = false
+    series bool longRetraceState = false
+    longPullback := upper <= upper[1]
+    longRetrace := lower < lower[1] and lower[1] >= lower[2]
+    longBreakout = upper[2] >= upper[1] and ta.crossover(bodyHigh, upper[1]) and longPullbackState[1] == true
+    longPullbackState := longPullback ? true : longBreakout ? false : longPullbackState[1]
+    longRetraceState := longRetrace ? true : longBreakout ? false : longRetraceState[1]
+
+    series bool shortPullback = false
+    series bool shortPullbackState = false
+    series bool shortRetrace = false
+    series bool shortRetraceState = false
+    shortPullback := lower >= lower[1]
+    shortRetrace := upper > upper[1] and upper[1] <= upper[2]
+    shortBreakout = lower[2] <= lower[1] and ta.crossunder(bodyLow, lower[1]) and shortPullbackState[1] == true
+    shortRetraceState := shortRetrace ? true : shortBreakout ? false : shortRetraceState[1]
+    shortPullbackState := shortPullback ? true : shortBreakout ? false : shortPullbackState[1]
+
+    // [lower, upper, midpoint, longPullback, longPullbackState, longRetrace, longRetraceState, longBreakout, shortPullback, shortPullbackState, shortRetrace, shortRetraceState, shortBreakout]
+    [lower, upper, midpoint, longPullback, longPullbackState, longBreakout, shortPullback, shortPullbackState, shortBreakout]
+    
+
+//#region------------------------ DI +/- -------------------------------
+
+///////////// ATR DI+/- COMPONENTS ////////////////////////////
+
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// originally copied from @BeikabuOyaji
+
+
+// @function rb_di_plus_minus
+// @description                ADX, DI+, DI- and other lines
+// @param adx_length          Number of bars to calculate the ADX
+// @param higher_timeframe    Higher timeframe
+// @param data_source         Data source for prices used in adx calculation
+// @returns                   trueRange, directionalMovementPlus, directionalMovementMinus, smoothedTrueRange, smoothedDirectionalMovementPlus, smoothedDirectionalMovementMinus, diPlus, diMinus, dx, adx, diHist
+// export rb_di_plus_minus(simple int adx_length = 14, simple int higher_timeframe = 180, series float data_source_high = high, series float data_source_low = low, series float data_source_close = close, series int htf_close_time = time_close) =>
+export rb_di_plus_minus(simple int adx_length = 14, simple int higher_timeframe = 180, series float data_source_high = high, series float data_source_low = low, series float data_source_close = close, series int htf_close_time = time_close, simple int ut = 10, simple int lt = -10) =>
+    htf_multiplier = math.round(higher_timeframe / timeframe.in_seconds())
+    // int adjusted_adx_length = adx_length * htf_multiplier
+    int adjusted_adx_length = adx_length
+    int upper_thresh = ut
+    int lower_thresh = lt
+    
+    //////////////////// Chart timeframe calcs /////////////////////////////
+    // true range = highest of: (highest of: (high-low or abs high - yest close) or (abs low - yest close))
+    series float trueRange = math.max(math.max(data_source_high - data_source_low, math.abs(data_source_high - nz(data_source_close[htf_multiplier]))), math.abs(data_source_low - nz(data_source_close[htf_multiplier])))
+
+    // DI+ = if high - yest high is greater than yest low - low, then highest of: high - yest high or zero else zero
+    directionalMovementPlus = data_source_high - nz(data_source_high[htf_multiplier]) > nz(data_source_low[htf_multiplier]) - data_source_low ? math.max(data_source_high - nz(data_source_high[htf_multiplier]), 0): 0
+
+    // DI- = if yest low - low is greater than high - yest high, then highest of: yest low - low or zero else zero
+    directionalMovementMinus = nz(data_source_low[htf_multiplier]) - data_source_low > data_source_high - nz(data_source_high[htf_multiplier]) ? math.max(nz(data_source_low[htf_multiplier]) - data_source_low, 0): 0
+
+    series float smoothedTrueRange = 0.0
+    smoothedTrueRange := nz(smoothedTrueRange[htf_multiplier]) - (nz(smoothedTrueRange[htf_multiplier]) / adjusted_adx_length) + trueRange
+
+    series float smoothedDirectionalMovementPlus = 0.0
+    smoothedDirectionalMovementPlus := nz(smoothedDirectionalMovementPlus[htf_multiplier]) - (nz(smoothedDirectionalMovementPlus[htf_multiplier]) / adjusted_adx_length) + directionalMovementPlus
+
+    series float smoothedDirectionalMovementMinus = 0.0
+    smoothedDirectionalMovementMinus := nz(smoothedDirectionalMovementMinus[htf_multiplier]) - (nz(smoothedDirectionalMovementMinus[htf_multiplier]) / adjusted_adx_length) + directionalMovementMinus
+
+    series float diPlus = smoothedDirectionalMovementPlus / smoothedTrueRange * 100
+    series float diMinus = smoothedDirectionalMovementMinus / smoothedTrueRange * 100
+    series float dx = math.abs(diPlus-diMinus) / (diPlus+diMinus)*100
+    series float adx = ta.sma(dx, adjusted_adx_length)
+    series float diHist = diPlus - diMinus
+
+    var closeTimeMatch = false
+    closeTimeMatch := time_close == htf_close_time
+
+    //////////// CROSSOVERS /////////////
+
+    fastCrossesZero = ta.cross(diHist, 0)
+    fastCrossesAboveZero = ta.crossover(diHist, 0)
+    fastCrossesBelowZero = ta.crossunder(diHist, 0)
+    fastCrossesAboveUpperThresh = ta.crossover(diHist, upper_thresh)
+    fastCrossesBelowLowerThresh = ta.crossunder(diHist, lower_thresh)
+    fastCrossesBelowUpperThresh = ta.crossunder(diHist, upper_thresh)
+    fastCrossesAboveLowerThresh = ta.crossover(diHist, lower_thresh)
+
+    upBreak = diHist > 0 and diHist > diHist[1] and diHist[1] < diHist[2]
+    dnBreak = diHist < 0 and diHist < diHist[1] and diHist[1] > diHist[2]
+
+    [diPlus, diMinus, dx, adx, diHist, closeTimeMatch, htf_multiplier, adjusted_adx_length, fastCrossesZero, fastCrossesAboveZero, fastCrossesBelowZero, fastCrossesAboveUpperThresh, fastCrossesBelowLowerThresh, fastCrossesBelowUpperThresh, fastCrossesAboveLowerThresh, upBreak, dnBreak]

@@ -1,0 +1,17 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © rinebob
+
+//@version=5
+indicator("rb Horz lines", overlay = false)
+
+line_1 = input.float(200, "Line 1")
+line_2 = input.float(100, "Line 2")
+line_3 = input.float(0, "Line 3")
+line_4 = input.float(-100, "Line 4")
+line_5 = input.float(-200, "Line 5")
+
+plot(line_1, "Line 1")
+plot(line_2, "Line 2")
+plot(line_3, "Line 3")
+plot(line_4, "Line 4")
+plot(line_5, "Line 5")
