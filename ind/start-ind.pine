@@ -1,0 +1,39 @@
+//@version=6
+indicator("Starter Indicator", shorttitle="StarterInd", overlay=true, timeframe="", timeframe_gaps=true)
+
+// Inputs
+src       = input.source(close, "Source")
+lenFast   = input.int(10, "Fast MA", minval=1)
+lenSlow   = input.int(30, "Slow MA", minval=1)
+useHTF    = input.bool(true, "Use HTF Filter")
+htf       = input.timeframe("W", "HTF (set to Weekly)")
+inSess    = input.session("0000-2359", "Session")
+showSignals = input.bool(true, "Show Signals")
+showLabels  = input.bool(false, "Show Label Text")
+
+// Core calcs
+maFast = ta.sma(src, lenFast)
+maSlow = ta.sma(src, lenSlow)
+
+// Session filter (current TF)
+sessOK = not na(time(timeframe.period, inSess))
+
+// Optional HTF filter (no repaint)
+htfFast = request.security(syminfo.tickerid, htf, ta.sma(src, lenFast), barmerge.gaps_off, barmerge.lookahead_off)
+htfSlow = request.security(syminfo.tickerid, htf, ta.sma(src, lenSlow), barmerge.gaps_off, barmerge.lookahead_off)
+htfOK   = not useHTF or (htfFast > htfSlow and barstate.isconfirmed)
+
+// Signals
+bull = ta.crossover(maFast, maSlow) and sessOK and htfOK
+bear = ta.crossunder(maFast, maSlow) and sessOK and htfOK
+
+// Plots
+plot(maFast, "Fast MA", color=color.teal, linewidth=2)
+plot(maSlow, "Slow MA", color=color.orange, linewidth=2)
+
+plotshape(showSignals and showLabels and bull, title="Bull Signal", style=shape.triangleup, color=color.new(color.teal, 0), location=location.belowbar, size=size.tiny, text="Bull")
+plotshape(showSignals and showLabels and bear, title="Bear Signal", style=shape.triangledown, color=color.new(color.orange, 0), location=location.abovebar, size=size.tiny, text="Bear")
+
+// Alerts
+alertcondition(bull, title="Bullish Crossover", message="Bullish crossover on {{ticker}} {{interval}}")
+alertcondition(bear, title="Bearish Crossunder", message="Bearish crossunder on {{ticker}} {{interval}}")
