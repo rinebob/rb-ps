@@ -1,0 +1,43 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © rinebob
+
+//@version=6
+indicator("rb smHA HTF plot", "SmHaHtfPlt", overlay=true, timeframe="", timeframe_gaps=false)
+
+// IMPORTANT: When you paste this into TradingView, update the import path
+// below to match the published HTF smHA core library name and version.
+// For example, if the HTF lib is published as:
+//   rinebob/rbSmHaHtfCore/1
+// then you would use:
+//   import rinebob/rbSmHaHtfCore/1 as smhaHTF
+// Here we keep a placeholder path you can quickly edit.
+import rinebob/rbSmHaCoreHtf/1 as smhaHTF
+
+// Inputs
+htf     = input.timeframe("D", "Higher timeframe", group="HTF")
+smoothL = input.int(5, "Smooth length", minval=1, group="HTF")
+afterL  = input.int(5, "After-smooth length", minval=1, group="HTF")
+
+// -----------------------------------------------------------------------------
+// HTF OHLC and close time (non-repaint: lookahead_off)
+// -----------------------------------------------------------------------------
+
+htfOpen      = request.security(syminfo.tickerid, htf, open,       lookahead=barmerge.lookahead_off)
+htfHigh      = request.security(syminfo.tickerid, htf, high,       lookahead=barmerge.lookahead_off)
+htfLow       = request.security(syminfo.tickerid, htf, low,        lookahead=barmerge.lookahead_off)
+htfClose     = request.security(syminfo.tickerid, htf, close,      lookahead=barmerge.lookahead_off)
+htfCloseTime = request.security(syminfo.tickerid, htf, time_close, lookahead=barmerge.lookahead_off)
+
+// -----------------------------------------------------------------------------
+// Compute HTF smHA bands via library htf_smha_fast_slow
+// Note: we plot the JAGGED HTF outputs (hoo/hhh/hll/hcc), which only update
+// on HTF closes, to get the broad, stepped HTF band.
+// -----------------------------------------------------------------------------
+
+[ho, hh, hl, hc, hm, hup, hdn, hoo, hhh, hll, hcc, hmm, hHtfUp, hHtfDn, hCrossUp, hCrossDn, hCloseMatch] = smhaHTF.htf_smha_fast_slow(smoothL, afterL, htf, htfOpen, htfHigh, htfLow, htfClose, htfCloseTime)
+
+upColor = color.new(color.yellow, 0)
+dnColor = color.new(color.blue, 0)
+
+// Plot jagged HTF smHA candles on price
+plotcandle(hoo, hhh, hll, hcc, title="HTF smHA", color=hcc > hoo ? upColor : dnColor, force_overlay=true)

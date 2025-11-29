@@ -1,0 +1,116 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © rinebob
+
+//@version=6
+library("rbSmHaCoreHtf", overlay=false)
+
+// IMPORTANT: When you paste this into TradingView, update the import path
+// below to match the published chart‑TF smHA core library name and version.
+// For example, if the chart‑TF lib is published as:
+//   rinebob/rbSmHaCore/1
+// then you would use:
+//   import rinebob/rbSmHaCore/1 as smhaCTF
+import rinebob/rbSmHaCore/2 as smhaCTF
+
+// htf_smha_fast_slow
+// -------------------
+// Full smoothed Heiken Ashi band engine, copied from rb-ta-lib.pine and
+// adapted to Pine v6 syntax. This is the HTF-capable core. It is
+// TIMEFRAME-AGNOSTIC: the timeframe of the outputs is exactly the
+// timeframe of the src_* series you feed in.
+//
+// USAGE / TIMEFRAME SETUP
+// -----------------------
+// 1) Chart timeframe usage (no HTF):
+//    - Call from a chart-TF script and pass chart OHLC directly:
+//        [o,h,l,c,m,up,dn,oo,hh,ll,cc,mm,htfUp,htfDn,crossUp,crossDn,closeMatch] =
+//            htf_smha_fast_slow(smoothLen, afterSmoothLen, timeframe.period,
+//                                open, high, low, close, time_close)
+//    - In this case, all outputs are on the CHART timeframe.
+//
+// 2) True HTF usage (recommended pattern):
+//    - First, request HTF OHLC and close time using request.security with
+//      lookahead=barmerge.lookahead_off, e.g.:
+//        htfOpen  = request.security(syminfo.tickerid, higher_timeframe, open,
+//                                   lookahead=barmerge.lookahead_off)
+//        htfHigh  = request.security(syminfo.tickerid, higher_timeframe, high,
+//                                   lookahead=barmerge.lookahead_off)
+//        htfLow   = request.security(syminfo.tickerid, higher_timeframe, low,
+//                                   lookahead=barmerge.lookahead_off)
+//        htfClose = request.security(syminfo.tickerid, higher_timeframe, close,
+//                                   lookahead=barmerge.lookahead_off)
+//        htfCloseTime = request.security(syminfo.tickerid, higher_timeframe, time_close,
+//                                        lookahead=barmerge.lookahead_off)
+//    - Then pass those series into this function:
+//        [o,h,l,c,m,up,dn,oo,hh,ll,cc,mm,htfUp,htfDn,crossUp,crossDn,closeMatch] =
+//            htf_smha_fast_slow(smoothLen, afterSmoothLen, higher_timeframe,
+//                                htfOpen, htfHigh, htfLow, htfClose, htfCloseTime)
+//    - In this case, all outputs are on the HIGHER timeframe.
+//
+// 3) Important: this function itself DOES NOT call request.security or
+//    change timeframes. It only consumes whatever series you give it.
+//    Non-repaint safety (lookahead_off, barstate.isconfirmed, etc.) must
+//    be handled by the caller.
+//
+// Parameters:
+//   smooth_length       - int, smoothing length before HA calculation (in bars of src_*)
+//   after_smooth_length - int, smoothing length after HA calculation (in bars of src_*)
+//   higher_timeframe    - string, target timeframe (e.g. "3", "15", "60", "D")
+//   src_open            - series float, source open (usually HTF-aggregated)
+//   src_high            - series float, source high  (usually HTF-aggregated)
+//   src_low             - series float, source low   (usually HTF-aggregated)
+//   src_close           - series float, source close (usually HTF-aggregated)
+//   htf_close_time      - series int, HTF bar close time used to step jagged outputs
+//
+// Returns (same order as original rb_TA_lib.htf_heiken_ashi):
+//   [o, h, l, c, m, up, dn, oo, hh, ll, cc, mm, htfUp, htfDn,
+//    closeCrossesAboveHA, closeCrossesBelowHA, closeTimeMatch]
+// Note: make sure the space before each param is preserved for PS editor
+export htf_smha_fast_slow(
+     simple int     smooth_length,
+     simple int     after_smooth_length,
+     simple string  higher_timeframe,
+     series float   src_open,
+     series float   src_high,
+     series float   src_low,
+     series float   src_close,
+     series int     htf_close_time) =>
+
+    // Lengths are already expressed in bars of the source series (src_*).
+    // No additional timeframe scaling is applied here.
+    int beforeLength = smooth_length
+    int afterLength  = after_smooth_length
+
+    // HTF close-time alignment
+    // When called in chart-TF mode (higher_timeframe == timeframe.period), every
+    // bar is effectively a closeTimeMatch. For true HTF usage, we use the
+    // provided htf_close_time series to step the jagged outputs.
+    bool sameTf = higher_timeframe == timeframe.period
+    var closeTimeMatch = false
+    closeTimeMatch := sameTf or (time_close == htf_close_time)
+
+    // Delegate core smHA math to chart-timeframe engine (single SOT)
+    [o, h, l, c, m, up, dn, closeCrossesAboveHA, closeCrossesBelowHA] = smhaCTF.smha_fast_slow_src(src_open, src_high, src_low, src_close, beforeLength, afterLength)
+
+    // HTF jagged stepping: oo/hh/ll/cc/mm only update when closeTimeMatch is true
+    series float oo = 0.0
+    series float hh = 0.0
+    series float ll = 0.0
+    series float cc = 0.0
+    series float mm = 0.0
+
+    oo := closeTimeMatch ? o : oo[1]
+    hh := closeTimeMatch ? h : hh[1]
+    ll := closeTimeMatch ? l : ll[1]
+    cc := closeTimeMatch ? c : cc[1]
+    mm := closeTimeMatch ? m : mm[1]
+
+    hh := oo > cc ? oo : cc
+    ll := oo > cc ? cc : oo
+
+    // HTF trend flags based on jagged OHLC
+    htfUp = cc > oo
+    htfDn = oo > cc
+
+    [o, h, l, c, m, up, dn, oo, hh, ll, cc, mm, htfUp, htfDn,
+     closeCrossesAboveHA, closeCrossesBelowHA, closeTimeMatch]

@@ -1,0 +1,43 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © rinebob
+
+//@version=6
+indicator("aa-smha-core-plot", "SmHaCorePlot", overlay=true, timeframe="", timeframe_gaps=false)
+
+// IMPORTANT: When you paste this into TradingView, update the import path
+// below to match the published library name and version. For example:
+//   import rinebob/rbSmHaCore/1 as smha
+// Here we keep a placeholder path you can quickly edit.
+import rinebob/rbSmHaCore/2 as smha
+
+// Inputs: chart‑TF smoothed Heiken Ashi lengths
+fastLen = input.int(5, "Fast length", minval=1, group="smHA")
+slowLen = input.int(10, "Slow length", minval=1, group="smHA")
+
+// -----------------------------------------------------------------------------
+// Compute: chart‑TF smHA bands via library smha_fast_slow
+// -----------------------------------------------------------------------------
+
+// Fast band (chart timeframe)
+[b1o, b1h, b1l, b1c, b1m, b1Up, b1Dn, b1CrossUp, b1CrossDn] = smha.smha_fast_slow(fastLen, fastLen)
+
+// Slow band (chart timeframe)
+[b2o, b2h, b2l, b2c, b2m, b2Up, b2Dn, b2CrossUp, b2CrossDn] = smha.smha_fast_slow(slowLen, slowLen)
+
+upColor = color.yellow
+dnColor = color.blue
+
+// Plot candles on price, identical style to legacy Fast/Slow smHA
+plotcandle(
+     b1o, b1h, b1l, b1c,
+     title = "Fast smHA",
+     color = b1c > b1o ? upColor : dnColor,
+     force_overlay = true
+  )
+
+plotcandle(
+     b2o, b2h, b2l, b2c,
+     title = "Slow smHA",
+     color = b2c > b2o ? upColor : dnColor,
+     force_overlay = true
+  )
