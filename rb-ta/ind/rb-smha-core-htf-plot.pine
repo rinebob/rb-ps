@@ -1,0 +1,46 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © rinebob
+
+//@version=6
+indicator("rb smHA HTF", "SmHaHtf", overlay=true, timeframe="", timeframe_gaps=false)
+
+// HTF smoothed Heiken Ashi bands (fast & slow, jagged) using rbSmHaCoreHtf.
+// This wrapper requests HTF OHLC and plots two jagged HTF smHA bands.
+
+// IMPORTANT: When you paste this into TradingView, update the import path
+// below to match the published rbSmHaCoreHtf library name and version.
+// Example:
+//   import rinebob/rbSmHaCoreHtf/1 as smhaHTF
+import rinebob/rbSmHaCoreHtf/3 as smhaHTF
+
+// Inputs
+htfGroup = "HTF"
+
+htfTf          = input.timeframe("W", "Higher timeframe",                     group=htfGroup)
+htfFastSmoothL = input.int(5,   "HTF Fast smooth length",       minval=1,    group=htfGroup)
+htfFastAfterL  = input.int(5,   "HTF Fast after-smooth length", minval=1,    group=htfGroup)
+htfSlowSmoothL = input.int(10,  "HTF Slow smooth length",       minval=1,    group=htfGroup)
+htfSlowAfterL  = input.int(10,  "HTF Slow after-smooth length", minval=1,    group=htfGroup)
+
+showHtfFast = input.bool(true,  "Show HTF fast band", group=htfGroup)
+showHtfSlow = input.bool(true,  "Show HTF slow band", group=htfGroup)
+
+// HTF OHLC and close time (non-repaint: lookahead_off)
+htfOpen      = request.security(syminfo.tickerid, htfTf, open,       lookahead=barmerge.lookahead_off)
+htfHigh      = request.security(syminfo.tickerid, htfTf, high,       lookahead=barmerge.lookahead_off)
+htfLow       = request.security(syminfo.tickerid, htfTf, low,        lookahead=barmerge.lookahead_off)
+htfClose     = request.security(syminfo.tickerid, htfTf, close,      lookahead=barmerge.lookahead_off)
+htfCloseTime = request.security(syminfo.tickerid, htfTf, time_close, lookahead=barmerge.lookahead_off)
+
+// Fast HTF band (jagged outputs)
+[hoFast, hhFast, hlFast, hcFast, hmFast, hupFast, hdnFast, hooFast, hhhFast, hllFast, hccFast, hmmFast, hHtfUpFast, hHtfDnFast, hCrossUpFast, hCrossDnFast, hCloseMatchFast] = smhaHTF.htf_smha_fast_slow(htfFastSmoothL, htfFastAfterL, htfTf, htfOpen, htfHigh, htfLow, htfClose, htfCloseTime)
+
+// Slow HTF band (jagged outputs)
+[hoSlow, hhSlow, hlSlow, hcSlow, hmSlow, hupSlow, hdnSlow, hooSlow, hhhSlow, hllSlow, hccSlow, hmmSlow, hHtfUpSlow, hHtfDnSlow, hCrossUpSlow, hCrossDnSlow, hCloseMatchSlow] = smhaHTF.htf_smha_fast_slow(htfSlowSmoothL, htfSlowAfterL, htfTf, htfOpen, htfHigh, htfLow, htfClose, htfCloseTime)
+
+htfFastColor = color.new(color.yellow, 0)
+htfSlowColor = color.new(color.blue,   0)
+
+// Plot jagged HTF smHA candles on price (broad, stepped bands)
+plotcandle(showHtfFast ? hooFast : na, showHtfFast ? hhhFast : na, showHtfFast ? hllFast : na, showHtfFast ? hccFast : na, title="HTF smHA fast", color=hccFast > hooFast ? htfFastColor : htfSlowColor, force_overlay=true)
+plotcandle(showHtfSlow ? hooSlow : na, showHtfSlow ? hhhSlow : na, showHtfSlow ? hllSlow : na, showHtfSlow ? hccSlow : na, title="HTF smHA slow", color=hccSlow > hooSlow ? htfFastColor : htfSlowColor, force_overlay=true)

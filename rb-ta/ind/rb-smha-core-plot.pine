@@ -1,0 +1,36 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © rinebob
+
+//@version=6
+indicator("rb smHA CTF", "SmHaCtf", overlay=true, timeframe="", timeframe_gaps=false)
+
+// CTF smoothed Heiken Ashi bands (fast & slow) using rbSmHaCore library.
+// This wrapper plots two chart-timeframe smHA bands with optional toggles.
+
+// IMPORTANT: When you paste this into TradingView, update the import path
+// below to match the published rbSmHaCore library name and version.
+// Example:
+//   import rinebob/rbSmHaCore/1 as smhaCTF
+import rinebob/rbSmHaCore/2 as smhaCTF
+
+// Inputs
+ctfGroup = "CTF"
+
+ctfFastSmoothL = input.int(5,  "CTF Fast smooth length",       minval=1, group=ctfGroup)
+ctfFastAfterL  = input.int(5,  "CTF Fast after-smooth length", minval=1, group=ctfGroup)
+ctfSlowSmoothL = input.int(10, "CTF Slow smooth length",       minval=1, group=ctfGroup)
+ctfSlowAfterL  = input.int(10, "CTF Slow after-smooth length", minval=1, group=ctfGroup)
+
+showCtfFast = input.bool(true, "Show CTF fast band", group=ctfGroup)
+showCtfSlow = input.bool(true, "Show CTF slow band", group=ctfGroup)
+
+// Compute CTF fast & slow bands via library core
+[coFast, chFast, clFast, ccFast, cmFast, cupFast, cdnFast, cCrossUpFast, cCrossDnFast] = smhaCTF.smha_fast_slow_src(open, high, low, close, ctfFastSmoothL, ctfFastAfterL)
+[coSlow, chSlow, clSlow, ccSlow, cmSlow, cupSlow, cdnSlow, cCrossUpSlow, cCrossDnSlow] = smhaCTF.smha_fast_slow_src(open, high, low, close, ctfSlowSmoothL, ctfSlowAfterL)
+
+ctfFastColor = color.new(color.yellow, 0)
+ctfSlowColor = color.new(color.blue,   0)
+
+// Plot CTF smHA candles on price
+plotcandle(showCtfFast ? coFast : na, showCtfFast ? chFast : na, showCtfFast ? clFast : na, showCtfFast ? ccFast : na, title="CTF smHA fast", color=ccFast > coFast ? ctfFastColor : ctfSlowColor)
+plotcandle(showCtfSlow ? coSlow : na, showCtfSlow ? chSlow : na, showCtfSlow ? clSlow : na, showCtfSlow ? ccSlow : na, title="CTF smHA slow", color=ccSlow > coSlow ? ctfFastColor : ctfSlowColor)

@@ -1,0 +1,91 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © rinebob
+
+//@version=6
+library("rbSmHaCoreHtf", overlay=false)
+
+// htf_smha_fast_slow
+// -------------------
+// Full smoothed Heiken Ashi band engine for higher timeframes, adapted
+// from the legacy rb_TA_lib.htf_heiken_ashi implementation. This version
+// uses an HTF multiplier and closeTimeMatch stepping so its outputs match
+// the original indicator's HTF bands.
+//
+// Parameters:
+//   smooth_length       - int, smoothing length before HA calculation
+//   after_smooth_length - int, smoothing length after HA calculation
+//   higher_timeframe    - string, target timeframe (e.g. "3", "15", "60", "D")
+//   src_open            - series float, source open (usually HTF-aggregated)
+//   src_high            - series float, source high  (usually HTF-aggregated)
+//   src_low             - series float, source low   (usually HTF-aggregated)
+//   src_close           - series float, source close (usually HTF-aggregated)
+//   htf_close_time      - series int, HTF bar close time used to step jagged outputs
+//
+// Returns (same order as legacy htf_heiken_ashi):
+//   [o, h, l, c, m, up, dn, oo, hh, ll, cc, mm, htfUp, htfDn,
+//    closeCrossesAboveHA, closeCrossesBelowHA, closeTimeMatch]
+export htf_smha_fast_slow(
+     simple int     smooth_length,
+     simple int     after_smooth_length,
+     simple string  higher_timeframe,
+     series float   src_open,
+     series float   src_high,
+     series float   src_low,
+     series float   src_close,
+     series int     htf_close_time) =>
+
+    float haopen = na
+
+    htf_multiplier = timeframe.in_seconds(higher_timeframe) / timeframe.in_seconds()
+    int beforeLength = smooth_length * htf_multiplier
+    int afterLength  = after_smooth_length * htf_multiplier
+
+    var bool closeTimeMatch = false
+    closeTimeMatch := time_close == htf_close_time
+
+    o = ta.ema(src_open,  beforeLength)
+    h = ta.ema(src_high,  beforeLength)
+    l = ta.ema(src_low,   beforeLength)
+    c = ta.ema(src_close, beforeLength)
+    series float m = 0.0
+
+    haclose = (o + h + l + c) / 4.0
+    haopen := na(haopen[htf_multiplier]) ? (o + c) / 2 : (haopen[htf_multiplier] + haclose[htf_multiplier]) / 2
+    hahigh = math.max(h, math.max(haopen, haclose))
+    halow  = math.min(l, math.min(haopen, haclose))
+
+    o := ta.ema(haopen,  afterLength)
+    h := ta.ema(hahigh,  afterLength)
+    l := ta.ema(halow,   afterLength)
+    c := ta.ema(haclose, afterLength)
+
+    h := o > c ? o : c
+    l := o > c ? c : o
+    m := l + (math.abs(h - l) / 2)
+
+    series float oo = 0.0
+    series float hh = 0.0
+    series float ll = 0.0
+    series float cc = 0.0
+    series float mm = 0.0
+
+    oo := closeTimeMatch ? o : oo[1]
+    hh := closeTimeMatch ? h : hh[1]
+    ll := closeTimeMatch ? l : ll[1]
+    cc := closeTimeMatch ? c : cc[1]
+    mm := closeTimeMatch ? m : mm[1]
+
+    hh := oo > cc ? oo : cc
+    ll := oo > cc ? cc : oo
+
+    closeCrossesAboveHA = ta.crossover(src_close, h)
+    closeCrossesBelowHA = ta.crossunder(src_close, l)
+
+    up = c > o
+    dn = o > c
+    htfUp = cc > oo
+    htfDn = oo > cc
+
+    [o, h, l, c, m, up, dn, oo, hh, ll, cc, mm, htfUp, htfDn,
+     closeCrossesAboveHA, closeCrossesBelowHA, closeTimeMatch]
+
