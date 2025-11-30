@@ -1,0 +1,95 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © rinebob
+
+//@version=6
+indicator("rb smHA Four Band", "SmHa4Band", overlay=true, timeframe="", timeframe_gaps=false)
+
+// Unified CTF/HTF smoothed Heiken Ashi bands (fast & slow, jagged) using rbSmHaCoreHtf.
+// This wrapper provides four smoothed heiken ashi bands in a single indicator with lower
+// pane plots for:
+// zonePlusThree, zonePlusTwo, zonePlusOne, zoneMinusOne, zoneMinusTwo and zoneMinusThree.
+
+// Saved in TradingView as aa-smha-four-band-plot as indicator
+
+// IMPORTANT: When you paste this into TradingView, update the import path
+// below to match the published rbSmHaCore and rbSmHaCoreHtf library name and version.
+// Example:
+//   import rinebob/rbSmHaCore/1 as smhaHTF
+//   import rinebob/rbSmHaCoreHtf/1 as smhaHTF
+import rinebob/rbSmHaCore/2 as smhaCTF
+import rinebob/rbSmHaCoreHtf/3 as smhaHTF
+
+//////////////////////// INPUTS ////////////////////////////////////////
+
+htfTf = input.timeframe("3D", "Higher timeframe")
+ha_smooth_length_fast = input.int(5, "Fast length", minval=1)
+ha_smooth_length_slow = input.int(10, "Slow length", minval=1)      
+
+//////////////////////// BANDS ///////////////////////////////////////
+
+// HTF OHLC and close time (non-repaint: lookahead_off)
+htfOpen      = request.security(syminfo.tickerid, htfTf, open,       lookahead=barmerge.lookahead_off)
+htfHigh      = request.security(syminfo.tickerid, htfTf, high,       lookahead=barmerge.lookahead_off)
+htfLow       = request.security(syminfo.tickerid, htfTf, low,        lookahead=barmerge.lookahead_off)
+htfClose     = request.security(syminfo.tickerid, htfTf, close,      lookahead=barmerge.lookahead_off)
+htfCloseTime = request.security(syminfo.tickerid, htfTf, time_close, lookahead=barmerge.lookahead_off)
+
+
+// CTF fast (band 1) and slow (band 2)
+[b1o, b1h, b1l, b1c, b1m, b1Up, b1Dn, b1CrossUp, b1CrossDn] = smhaCTF.smha_fast_slow_src(open, high, low, close, ha_smooth_length_fast, ha_smooth_length_fast)
+[b2o, b2h, b2l, b2c, b2m, b2Up, b2Dn, b2CrossUp, b2CrossDn] = smhaCTF.smha_fast_slow_src(open, high, low, close, ha_smooth_length_slow, ha_smooth_length_slow)
+
+// HTF fast (band 3) and slow (band 4)
+[hoFast, hhFast, hlFast, hcFast, hmFast, hupFast, hdnFast, b3o, b3h, b3l, b3c, b3m, b3Up, b3Dn, b3CrossUp, b3CrossDn, b3CloseMatch] = smhaHTF.htf_smha_fast_slow(ha_smooth_length_fast, ha_smooth_length_fast, htfTf, htfOpen, htfHigh, htfLow, htfClose, htfCloseTime)
+[hoSlow, hhSlow, hlSlow, hcSlow, hmSlow, hupSlow, hdnSlow, b4o, b4h, b4l, b4c, b4m, b4Up, b4Dn, b4CrossUp, b4CrossDn, b4CloseMatch] = smhaHTF.htf_smha_fast_slow(ha_smooth_length_slow, ha_smooth_length_slow, htfTf, htfOpen, htfHigh, htfLow, htfClose, htfCloseTime)
+
+
+///////////////// SIGNALS / CROSSOVERS ////////////////////////
+
+midpoint = low + (math.abs(high - low) / 2)
+
+// categories for different permutations of Up/down trends
+threeUp = (b1Up and b2Up and b3Up) or (b1Up and b2Dn and b3Up)
+twoUp = b1Dn and b2Up and b3Up
+oneUp = b1Dn and b2Dn and b3Up
+oneDown = b1Up and b2Up and b3Dn
+twoDown = b1Up and b2Dn and b3Dn
+threeDown = (b3Dn and b2Dn and b1Dn) or (b3Dn and b2Up and b1Dn)
+
+// Price vs HA band zones
+zonePlusThree = (midpoint > b1m and (oneUp or twoUp or threeUp)) or (midpoint > b3m and (threeDown or twoDown or oneDown))
+zoneMinusThree = (midpoint < b1m and (oneDown or twoDown or threeDown)) or (midpoint < b3m and (oneUp or twoUp or threeUp))
+
+zonePlusTwo = ((midpoint > b2m) and (midpoint <= b1m)) and (twoUp or threeUp)
+zoneMinusTwo = ((midpoint < b2m) and (midpoint >= b1m)) and (twoDown or threeDown)
+
+zonePlusOne = (midpoint > b3m and midpoint <= b2m) and (oneUp or twoUp or threeUp)
+zoneMinusOne = (midpoint < b3m and midpoint >= b2m) and (oneDown or twoDown or threeDown)
+
+///////////////// PLOTS //////////////////
+
+smHAColor = zonePlusThree ? color.blue : zonePlusTwo ? color.teal : zonePlusOne ? color.silver : zoneMinusOne ? color.white : zoneMinusTwo ? color.fuchsia : zoneMinusThree ? color.yellow : color.navy
+barcolor(smHAColor)
+
+upColor = color.new(color.yellow, 0)
+dnColor = color.new(color.blue,   0)
+
+// band 1
+plotcandle(b1o, b1h, b1l, b1c, title="CTF smHA fast", color=b1c > b1o ? upColor : dnColor, force_overlay = true)
+
+// band 2
+plotcandle(b2o, b2h, b2l, b2c, title="CTF smHA slow", color=b2c > b2o ? upColor : dnColor, force_overlay = true)
+
+// band 3
+plotcandle(b3o, b3h, b3l, b3c, title="HTF smHA fast", color=b3c > b3o ? upColor : dnColor, force_overlay = true)
+
+// band 4
+plotcandle(b4o, b4h, b4l, b4c, title="HTF smHA slow", color=b4c > b4o ? upColor : dnColor, force_overlay = true)
+
+// zones
+plot(zonePlusThree ? 5 : na, "zonePlusThree", style = plot.style_cross, linewidth = 3, color = color.blue)
+plot(zonePlusTwo ? 4 : na, "zonePlusTwo", style = plot.style_cross, linewidth = 3, color = color.teal)
+plot(zonePlusOne ? 3 : na, "zonePlusOne", style = plot.style_cross, linewidth = 3, color = color.silver)
+plot(zoneMinusOne ? 2 : na, "zoneMinusOne", style = plot.style_cross, linewidth = 3, color = color.white)
+plot(zoneMinusTwo ? 1 : na, "zoneMinusTwo", style = plot.style_cross, linewidth = 3, color = color.fuchsia)
+plot(zoneMinusThree ? 0 : na, "zoneMinusThree", style = plot.style_cross, linewidth = 3, color = color.yellow)
