@@ -1,0 +1,201 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © rinebob
+
+//@version=6
+indicator("AA_DEV_smHA", "SmHaDev", overlay=true, timeframe="", timeframe_gaps=false)
+
+//======================================================================
+// CORE ENGINE (CTF) – single source of truth
+//======================================================================
+
+// Generic bar-level smoothed Heiken Ashi band engine.
+// Returns: [o, h, l, c, m, up, dn, closeCrossesAboveHA, closeCrossesBelowHA]
+smha_fast_slow_src(
+     series float src_open,
+     series float src_high,
+     series float src_low,
+     series float src_close,
+     simple int  smooth_length,
+     simple int  after_smooth_length) =>
+    float haopen = na
+
+    int beforeLength = smooth_length
+    int afterLength  = after_smooth_length
+
+    // Pre-smooth OHLC
+    o = ta.ema(src_open,  beforeLength)
+    h = ta.ema(src_high,  beforeLength)
+    l = ta.ema(src_low,   beforeLength)
+    c = ta.ema(src_close, beforeLength)
+    series float m = 0.0
+
+    // Heiken Ashi on smoothed OHLC
+    haclose = (o + h + l + c) / 4.0
+    haopen := na(haopen[1]) ? (o + c) / 2 : (haopen[1] + haclose[1]) / 2
+    hahigh = math.max(h, math.max(haopen, haclose))
+    halow  = math.min(l, math.min(haopen, haclose))
+
+    // Post-smooth HA OHLC
+    o := ta.ema(haopen,  afterLength)
+    h := ta.ema(hahigh,  afterLength)
+    l := ta.ema(halow,   afterLength)
+    c := ta.ema(haclose, afterLength)
+
+    // Force proper candle bodies and compute midpoint
+    h := o > c ? o : c
+    l := o > c ? c : o
+    m := l + (math.abs(h - l) / 2)
+
+    up = c > o
+    dn = o > c
+
+    closeCrossesAboveHA = ta.crossover(src_close, h)
+    closeCrossesBelowHA = ta.crossunder(src_close, l)
+
+    [o, h, l, c, m, up, dn, closeCrossesAboveHA, closeCrossesBelowHA]
+
+
+// Chart-timeframe wrapper around the generic engine.
+smha_fast_slow(simple int smooth_length, simple int after_smooth_length) =>
+    smha_fast_slow_src(open, high, low, close, smooth_length, after_smooth_length)
+
+//======================================================================
+// CORE ENGINE (HTF) – duplicates the code from CTF engine, adds jagged HTF stepping
+//======================================================================
+
+// Returns (same order as legacy htf_heiken_ashi):
+// [o, h, l, c, m, up, dn, oo, hh, ll, cc, mm, htfUp, htfDn,
+//  closeCrossesAboveHA, closeCrossesBelowHA, closeTimeMatch]
+htf_smha_fast_slow(
+     simple int     smooth_length,
+     simple int     after_smooth_length,
+     simple string  higher_timeframe,
+     series float   src_open,
+     series float   src_high,
+     series float   src_low,
+     series float   src_close,
+     series int     htf_close_time) =>
+
+    // Legacy-style HTF smoothed Heiken Ashi implementation adapted from
+    // htf_heiken_ashi in the original rb-ta-lib. This uses an HTF
+    // multiplier and closeTimeMatch stepping so the HTF bands visually
+    // match the legacy indicator.
+
+    float haopen = na
+
+    htf_multiplier = timeframe.in_seconds(higher_timeframe) / timeframe.in_seconds()
+    int beforeLength = smooth_length * htf_multiplier
+    int afterLength  = after_smooth_length * htf_multiplier
+
+    var bool closeTimeMatch = false
+    closeTimeMatch := time_close == htf_close_time
+
+    o = ta.ema(src_open,  beforeLength)
+    h = ta.ema(src_high,  beforeLength)
+    l = ta.ema(src_low,   beforeLength)
+    c = ta.ema(src_close, beforeLength)
+    series float m = 0.0
+
+    haclose = (o + h + l + c) / 4.0
+    haopen := na(haopen[htf_multiplier]) ? (o + c) / 2 : (haopen[htf_multiplier] + haclose[htf_multiplier]) / 2
+    hahigh = math.max(h, math.max(haopen, haclose))
+    halow  = math.min(l, math.min(haopen, haclose))
+
+    o := ta.ema(haopen,  afterLength)
+    h := ta.ema(hahigh,  afterLength)
+    l := ta.ema(halow,   afterLength)
+    c := ta.ema(haclose, afterLength)
+
+    h := o > c ? o : c
+    l := o > c ? c : o
+    m := l + (math.abs(h - l) / 2)
+
+    series float oo = 0.0
+    series float hh = 0.0
+    series float ll = 0.0
+    series float cc = 0.0
+    series float mm = 0.0
+
+    oo := closeTimeMatch ? o : oo[1]
+    hh := closeTimeMatch ? h : hh[1]
+    ll := closeTimeMatch ? l : ll[1]
+    cc := closeTimeMatch ? c : cc[1]
+    mm := closeTimeMatch ? m : mm[1]
+
+    hh := oo > cc ? oo : cc
+    ll := oo > cc ? cc : oo
+
+    closeCrossesAboveHA = ta.crossover(src_close, h)
+    closeCrossesBelowHA = ta.crossunder(src_close, l)
+
+    up = c > o
+    dn = o > c
+    htfUp = cc > oo
+    htfDn = oo > cc
+
+    [o, h, l, c, m, up, dn, oo, hh, ll, cc, mm, htfUp, htfDn,
+     closeCrossesAboveHA, closeCrossesBelowHA, closeTimeMatch]
+
+//======================================================================
+// INPUTS
+//======================================================================
+
+groupCtf = "CTF"
+groupHtf = "HTF"
+
+// CTF fast/slow
+ctfFastSmoothL = input.int(5,  "CTF Fast smooth length",       minval=1, group=groupCtf)
+ctfFastAfterL  = input.int(5,  "CTF Fast after-smooth length", minval=1, group=groupCtf)
+ctfSlowSmoothL = input.int(10, "CTF Slow smooth length",       minval=1, group=groupCtf)
+ctfSlowAfterL  = input.int(10, "CTF Slow after-smooth length", minval=1, group=groupCtf)
+
+showCtfFast = input.bool(true,  "Show CTF fast band", group=groupCtf)
+showCtfSlow = input.bool(true,  "Show CTF slow band", group=groupCtf)
+
+// HTF fast/slow
+htfTf          = input.timeframe("W", "Higher timeframe",                     group=groupHtf)
+htfFastSmoothL = input.int(5,   "HTF Fast smooth length",       minval=1,    group=groupHtf)
+htfFastAfterL  = input.int(5,   "HTF Fast after-smooth length", minval=1,    group=groupHtf)
+htfSlowSmoothL = input.int(10,  "HTF Slow smooth length",       minval=1,    group=groupHtf)
+htfSlowAfterL  = input.int(10,  "HTF Slow after-smooth length", minval=1,    group=groupHtf)
+
+showHtfFast = input.bool(true,  "Show HTF fast band", group=groupHtf)
+showHtfSlow = input.bool(true,  "Show HTF slow band", group=groupHtf)
+
+//======================================================================
+// CHART-TF smHA PLOTS (FAST & SLOW)
+//======================================================================
+
+[coFast, chFast, clFast, ccFast, cmFast, cupFast, cdnFast, cCrossUpFast, cCrossDnFast] = smha_fast_slow_src(open, high, low, close, ctfFastSmoothL, ctfFastAfterL)
+[coSlow, chSlow, clSlow, ccSlow, cmSlow, cupSlow, cdnSlow, cCrossUpSlow, cCrossDnSlow] = smha_fast_slow_src(open, high, low, close, ctfSlowSmoothL, ctfSlowAfterL)
+
+ctfFastColor = color.new(color.yellow, 0)
+ctfSlowColor = color.new(color.blue,   0)
+
+plotcandle(showCtfFast ? coFast : na, showCtfFast ? chFast : na, showCtfFast ? clFast : na, showCtfFast ? ccFast : na, title="CTF smHA fast", color=ccFast > coFast ? ctfFastColor : ctfSlowColor)
+plotcandle(showCtfSlow ? coSlow : na, showCtfSlow ? chSlow : na, showCtfSlow ? clSlow : na, showCtfSlow ? ccSlow : na, title="CTF smHA slow", color=ccSlow > coSlow ? ctfFastColor : ctfSlowColor)
+
+//======================================================================
+// HTF JAGGED smHA PLOTS (FAST & SLOW)
+//======================================================================
+
+// HTF OHLC and close time (non-repaint: lookahead_off)
+htfOpen      = request.security(syminfo.tickerid, htfTf, open,       lookahead=barmerge.lookahead_off)
+htfHigh      = request.security(syminfo.tickerid, htfTf, high,       lookahead=barmerge.lookahead_off)
+htfLow       = request.security(syminfo.tickerid, htfTf, low,        lookahead=barmerge.lookahead_off)
+htfClose     = request.security(syminfo.tickerid, htfTf, close,      lookahead=barmerge.lookahead_off)
+htfCloseTime = request.security(syminfo.tickerid, htfTf, time_close, lookahead=barmerge.lookahead_off)
+
+// Fast HTF band (jagged outputs)
+[hoFast, hhFast, hlFast, hcFast, hmFast, hupFast, hdnFast, hooFast, hhhFast, hllFast, hccFast, hmmFast, hHtfUpFast, hHtfDnFast, hCrossUpFast, hCrossDnFast, hCloseMatchFast] = htf_smha_fast_slow(htfFastSmoothL, htfFastAfterL, htfTf, htfOpen, htfHigh, htfLow, htfClose, htfCloseTime)
+
+// Slow HTF band (jagged outputs)
+[hoSlow, hhSlow, hlSlow, hcSlow, hmSlow, hupSlow, hdnSlow, hooSlow, hhhSlow, hllSlow, hccSlow, hmmSlow, hHtfUpSlow, hHtfDnSlow, hCrossUpSlow, hCrossDnSlow, hCloseMatchSlow] = htf_smha_fast_slow(htfSlowSmoothL, htfSlowAfterL, htfTf, htfOpen, htfHigh, htfLow, htfClose, htfCloseTime)
+
+htfFastColor = color.new(color.yellow, 0)
+htfSlowColor = color.new(color.blue,   0)
+
+// Plot jagged HTF smHA candles on price (broad, stepped bands)
+plotcandle(showHtfFast ? hooFast : na, showHtfFast ? hhhFast : na, showHtfFast ? hllFast : na, showHtfFast ? hccFast : na, title="HTF smHA fast", color=hccFast > hooFast ? htfFastColor : htfSlowColor, force_overlay=true)
+plotcandle(showHtfSlow ? hooSlow : na, showHtfSlow ? hhhSlow : na, showHtfSlow ? hllSlow : na, showHtfSlow ? hccSlow : na, title="HTF smHA slow", color=hccSlow > hooSlow ? htfFastColor : htfSlowColor, force_overlay=true)
+
