@@ -42,8 +42,139 @@ const float ZONE_DOT_ATR_MULTIPLIER = 2.5
 // SHARED MATH
 // =============================================================================
 
-// Shared EMA, missing-value, crossover, recursive smoothed-Heikin-Ashi, and
-// developing-HTF helpers are added by the next implementation task.
+// TypeScript emaSeries() uses an SMA seed after `length` valid values, then
+// applies the standard EMA recurrence. Missing source values retain the last
+// EMA value instead of resetting the series. Chart OHLC is contiguous; any
+// non-standard `na` seed behavior is an explicit validation item.
+f_ema(series float source, simple int length) =>
+    float alpha = 2.0 / (length + 1.0)
+    float seed = ta.sma(source, length)
+    var float value = na
+    value := na(value) ? seed : na(source) ? value : source * alpha + value * (1.0 - alpha)
+    value
+
+// Explicit equivalents of the TypeScript crossover/crossunder primitives.
+f_crossover(series float left, series float right) =>
+    not na(left) and not na(right) and not na(left[1]) and not na(right[1]) and left > right and left[1] <= right[1]
+
+f_crossunder(series float left, series float right) =>
+    not na(left) and not na(right) and not na(left[1]) and not na(right[1]) and left < right and left[1] >= right[1]
+
+f_nz(series float value) =>
+    na(value) ? 0.0 : value
+
+// Chart-timeframe smoothed Heikin-Ashi band engine. The returned H/L values
+// are body-forced from the post-smoothed O/C, matching st-trend-bands.ts.
+f_smha_ctf(
+    series float sourceOpen,
+    series float sourceHigh,
+    series float sourceLow,
+    series float sourceClose,
+    simple int smoothLength,
+    simple int afterSmoothLength) =>
+    float smoothOpen = f_ema(sourceOpen, smoothLength)
+    float smoothHigh = f_ema(sourceHigh, smoothLength)
+    float smoothLow = f_ema(sourceLow, smoothLength)
+    float smoothClose = f_ema(sourceClose, smoothLength)
+
+    float haClose = (smoothOpen + smoothHigh + smoothLow + smoothClose) / 4.0
+    var float haOpen = na
+    haOpen := na(haClose) ? na : na(haOpen[1]) ? (smoothOpen + smoothClose) / 2.0 : (haOpen[1] + haClose[1]) / 2.0
+    float haHigh = math.max(smoothHigh, math.max(haOpen, haClose))
+    float haLow = math.min(smoothLow, math.min(haOpen, haClose))
+
+    float postOpen = f_ema(haOpen, afterSmoothLength)
+    float postClose = f_ema(haClose, afterSmoothLength)
+
+    float bandHigh = math.max(postOpen, postClose)
+    float bandLow = math.min(postOpen, postClose)
+    float bandMid = bandLow + math.abs(bandHigh - bandLow) / 2.0
+    bool bandUp = postClose > postOpen
+    bool bandDown = postOpen > postClose
+    bool crossUp = f_crossover(sourceClose, bandHigh)
+    bool crossDown = f_crossunder(sourceClose, bandLow)
+
+    [postOpen, bandHigh, bandLow, postClose, bandMid, bandUp, bandDown, crossUp, crossDown]
+
+// Higher-timeframe smoothed Heikin-Ashi band engine. The recursive HA state
+// uses the fixed HTF multiplier and the stepped output updates only at the HTF
+// boundary, carrying the latest value across interim chart bars.
+f_smha_htf(
+    series float sourceOpen,
+    series float sourceHigh,
+    series float sourceLow,
+    series float sourceClose,
+    series int htfCloseTime,
+    simple int smoothLength,
+    simple int afterSmoothLength) =>
+    int beforeLength = smoothLength * HTF_MULTIPLIER
+    int afterLength = afterSmoothLength * HTF_MULTIPLIER
+    bool closeTimeMatch = time_close == htfCloseTime
+
+    float smoothOpen = f_ema(sourceOpen, beforeLength)
+    float smoothHigh = f_ema(sourceHigh, beforeLength)
+    float smoothLow = f_ema(sourceLow, beforeLength)
+    float smoothClose = f_ema(sourceClose, beforeLength)
+
+    float haClose = (smoothOpen + smoothHigh + smoothLow + smoothClose) / 4.0
+    var float haOpen = na
+    haOpen := na(haClose) ? na : na(haOpen[HTF_MULTIPLIER]) ? (smoothOpen + smoothClose) / 2.0 : (haOpen[HTF_MULTIPLIER] + haClose[HTF_MULTIPLIER]) / 2.0
+    float haHigh = math.max(smoothHigh, math.max(haOpen, haClose))
+    float haLow = math.min(smoothLow, math.min(haOpen, haClose))
+
+    float postOpen = f_ema(haOpen, afterLength)
+    float postClose = f_ema(haClose, afterLength)
+    float continuousHigh = math.max(postOpen, postClose)
+    float continuousLow = math.min(postOpen, postClose)
+    float continuousMid = continuousLow + math.abs(continuousHigh - continuousLow) / 2.0
+
+    var float steppedOpen = na
+    var float steppedClose = na
+    var float steppedMid = na
+    steppedOpen := closeTimeMatch and not na(postOpen) ? postOpen : steppedOpen[1]
+    steppedClose := closeTimeMatch and not na(postClose) ? postClose : steppedClose[1]
+    steppedMid := closeTimeMatch and not na(continuousMid) ? continuousMid : steppedMid[1]
+    float steppedHigh = math.max(steppedOpen, steppedClose)
+    float steppedLow = math.min(steppedOpen, steppedClose)
+    // TypeScript BandResult direction and cross triggers use the stepped band.
+    bool continuousUp = postClose > postOpen
+    bool continuousDown = postOpen > postClose
+    bool steppedUp = steppedClose > steppedOpen
+    bool steppedDown = steppedOpen > steppedClose
+    bool crossUp = f_crossover(sourceClose, steppedHigh)
+    bool crossDown = f_crossunder(sourceClose, steppedLow)
+
+    // [continuous O/H/L/C/M, continuous up/down, stepped O/H/L/C/M,
+    //  stepped up/down, cross up/down, HTF close match]
+    [postOpen, continuousHigh, continuousLow, postClose, continuousMid, continuousUp, continuousDown, steppedOpen, steppedHigh, steppedLow, steppedClose, steppedMid, steppedUp, steppedDown, crossUp, crossDown, closeTimeMatch]
+
+// =============================================================================
+// DEVELOPING HIGHER-TIMEFRAME DATA
+// =============================================================================
+
+// The TypeScript HTF engine runs on chart OHLC with scaled lengths and a
+// multiplier-based step. Pine therefore requests only the developing HTF
+// boundary and feeds chart OHLC into f_smha_htf; it does not double-scale
+// already-aggregated HTF OHLC. No [1] offset is used, so the active HTF
+// boundary remains available on realtime bars. Exact wall-clock boundary
+// matching can differ from the TypeScript index-based step on irregular
+// sessions; later validation must check early closes and missing bars.
+string ST_HTF_TIMEFRAME = timeframe.from_seconds(timeframe.in_seconds() * HTF_MULTIPLIER)
+int stHtfCloseTime = request.security(
+    syminfo.tickerid,
+    ST_HTF_TIMEFRAME,
+    time_close,
+    gaps=barmerge.gaps_off,
+    lookahead=barmerge.lookahead_off)
+
+// Instantiate the shared engines now so the foundation is compile-checked and
+// later indicator tasks can consume these series without changing the seam.
+[stCtfFastOpen, stCtfFastHigh, stCtfFastLow, stCtfFastClose, stCtfFastMid, stCtfFastUp, stCtfFastDown, stCtfFastCrossUp, stCtfFastCrossDown] = f_smha_ctf(open, high, low, close, CTF_FAST_LENGTH, CTF_FAST_LENGTH)
+[stHtfFastOpen, stHtfFastContinuousHigh, stHtfFastContinuousLow, stHtfFastContinuousClose, stHtfFastContinuousMid, stHtfFastUp, stHtfFastDown, stHtfFastOpenStepped, stHtfFastHighStepped, stHtfFastLowStepped, stHtfFastCloseStepped, stHtfFastMidStepped, stHtfFastUpStepped, stHtfFastDownStepped, stHtfFastCrossUp, stHtfFastCrossDown, stHtfFastCloseMatch] = f_smha_htf(open, high, low, close, stHtfCloseTime, CTF_FAST_LENGTH, CTF_FAST_LENGTH)
+
+// Hidden output keeps this shared foundation loadable in TradingView before
+// later tasks add the visible Trend Bands, zones, strength, and event plots.
+plot(na, "ST shared math foundation", display=display.none)
 
 // =============================================================================
 // TREND BANDS (CTF + HTF)
