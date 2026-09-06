@@ -1,0 +1,65 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © rinebob
+
+//@version=6
+indicator("Savant Trader ST", "ST", overlay=false, timeframe="", timeframe_gaps=false)
+
+// Standalone, read-only ST indicator foundation.
+//
+// This file is the single TradingView entry point for the ST port. The
+// indicator calculations are added in dependency order in later tasks:
+// shared math/state, Trend Bands and zones, Trend Strength, then the Zone
+// V1/V2 price-pane event overlay.
+//
+// Keep the historical rb-ps Pine files unchanged. This file is intentionally
+// self-contained so it can be copied into TradingView without a rel-str,
+// Firebase, broker, or exported-data dependency.
+//
+// The fixed HTF multiplier and developing-HTF policy are deliberate v1
+// decisions. Developing higher-timeframe values may repaint while the active
+// higher-timeframe candle is still forming; the indicator does not wait for
+// confirmation before painting interim bars.
+
+// =============================================================================
+// FIXED ST CONFIGURATION
+// =============================================================================
+
+// Trend Bands: each configured length is used for both pre- and post-smoothing.
+const int CTF_FAST_LENGTH = 5
+const int CTF_SLOW_LENGTH = 10
+const int HTF_MULTIPLIER = 3
+const int HTF_FAST_EFFECTIVE_LENGTH = CTF_FAST_LENGTH * HTF_MULTIPLIER
+const int HTF_SLOW_EFFECTIVE_LENGTH = CTF_SLOW_LENGTH * HTF_MULTIPLIER
+
+// Trend Strength and event-marker calculations.
+const int DI_LENGTH = 14
+const float DI_UPPER_THRESHOLD = 10.0
+const float DI_LOWER_THRESHOLD = -10.0
+const int ATR_LENGTH = 14
+const float ZONE_DOT_ATR_MULTIPLIER = 2.5
+
+// =============================================================================
+// SHARED MATH
+// =============================================================================
+
+// Shared EMA, missing-value, crossover, recursive smoothed-Heikin-Ashi, and
+// developing-HTF helpers are added by the next implementation task.
+
+// =============================================================================
+// TREND BANDS (CTF + HTF)
+// =============================================================================
+
+// =============================================================================
+// ZONE V1 / V2
+// =============================================================================
+
+// =============================================================================
+// TREND STRENGTH
+// =============================================================================
+
+// =============================================================================
+// MAIN-PANE EVENT OVERLAY
+// =============================================================================
+
+// The final indicator uses lower-pane plots by default. Price-pane series and
+// Zone V1/V2 event markers will opt into the main chart with force_overlay=true.
