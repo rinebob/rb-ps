@@ -167,22 +167,130 @@ int stHtfCloseTime = request.security(
     gaps=barmerge.gaps_off,
     lookahead=barmerge.lookahead_off)
 
-// Instantiate the shared engines now so the foundation is compile-checked and
-// later indicator tasks can consume these series without changing the seam.
+// Instantiate all four band engines. CTF fast/slow use the CTF engine; HTF
+// fast/slow use the HTF engine with the fixed multiplier-3 recursive lookback.
+// The HTF band output used for plotting and zone classification is the stepped
+// series (steppedOpen/High/Low/Close/Mid, steppedUp/steppedDown), matching the
+// TypeScript BandResult which is jagged-stepped before direction and crosses.
 [stCtfFastOpen, stCtfFastHigh, stCtfFastLow, stCtfFastClose, stCtfFastMid, stCtfFastUp, stCtfFastDown, stCtfFastCrossUp, stCtfFastCrossDown] = f_smha_ctf(open, high, low, close, CTF_FAST_LENGTH, CTF_FAST_LENGTH)
-[stHtfFastOpen, stHtfFastContinuousHigh, stHtfFastContinuousLow, stHtfFastContinuousClose, stHtfFastContinuousMid, stHtfFastUp, stHtfFastDown, stHtfFastOpenStepped, stHtfFastHighStepped, stHtfFastLowStepped, stHtfFastCloseStepped, stHtfFastMidStepped, stHtfFastUpStepped, stHtfFastDownStepped, stHtfFastCrossUp, stHtfFastCrossDown, stHtfFastCloseMatch] = f_smha_htf(open, high, low, close, stHtfCloseTime, CTF_FAST_LENGTH, CTF_FAST_LENGTH)
+[stCtfSlowOpen, stCtfSlowHigh, stCtfSlowLow, stCtfSlowClose, stCtfSlowMid, stCtfSlowUp, stCtfSlowDown, stCtfSlowCrossUp, stCtfSlowCrossDown] = f_smha_ctf(open, high, low, close, CTF_SLOW_LENGTH, CTF_SLOW_LENGTH)
 
-// Hidden output keeps this shared foundation loadable in TradingView before
-// later tasks add the visible Trend Bands, zones, strength, and event plots.
-plot(na, "ST shared math foundation", display=display.none)
-
-// =============================================================================
-// TREND BANDS (CTF + HTF)
-// =============================================================================
+[stHtfFastOpen, stHtfFastContinuousHigh, stHtfFastContinuousLow, stHtfFastContinuousClose, stHtfFastContinuousMid, stHtfFastContinuousUp, stHtfFastContinuousDown, stHtfFastOpenStepped, stHtfFastHighStepped, stHtfFastLowStepped, stHtfFastCloseStepped, stHtfFastMidStepped, stHtfFastUpStepped, stHtfFastDownStepped, stHtfFastCrossUp, stHtfFastCrossDown, stHtfFastCloseMatch] = f_smha_htf(open, high, low, close, stHtfCloseTime, CTF_FAST_LENGTH, CTF_FAST_LENGTH)
+[stHtfSlowOpen, stHtfSlowContinuousHigh, stHtfSlowContinuousLow, stHtfSlowContinuousClose, stHtfSlowContinuousMid, stHtfSlowContinuousUp, stHtfSlowContinuousDown, stHtfSlowOpenStepped, stHtfSlowHighStepped, stHtfSlowLowStepped, stHtfSlowCloseStepped, stHtfSlowMidStepped, stHtfSlowUpStepped, stHtfSlowDownStepped, stHtfSlowCrossUp, stHtfSlowCrossDown, stHtfSlowCloseMatch] = f_smha_htf(open, high, low, close, stHtfCloseTime, CTF_SLOW_LENGTH, CTF_SLOW_LENGTH)
 
 // =============================================================================
-// ZONE V1 / V2
+// TREND BANDS (CTF + HTF) — main price pane
 // =============================================================================
+
+// Four smoothed Heikin-Ashi bands rendered as candles on the main chart.
+// Up candles are yellow, down candles are blue, matching the historical
+// rb-smha-four-band-plot.pine convention. force_overlay=true places these
+// on the price pane even though the indicator default is overlay=false.
+color stBandUpColor = color.new(color.yellow, 0)
+color stBandDnColor = color.new(color.blue, 0)
+
+plotcandle(stCtfFastOpen, stCtfFastHigh, stCtfFastLow, stCtfFastClose, title="CTF smHA fast", color=stCtfFastClose > stCtfFastOpen ? stBandUpColor : stBandDnColor, force_overlay=true)
+plotcandle(stCtfSlowOpen, stCtfSlowHigh, stCtfSlowLow, stCtfSlowClose, title="CTF smHA slow", color=stCtfSlowClose > stCtfSlowOpen ? stBandUpColor : stBandDnColor, force_overlay=true)
+plotcandle(stHtfFastOpenStepped, stHtfFastHighStepped, stHtfFastLowStepped, stHtfFastCloseStepped, title="HTF smHA fast", color=stHtfFastCloseStepped > stHtfFastOpenStepped ? stBandUpColor : stBandDnColor, force_overlay=true)
+plotcandle(stHtfSlowOpenStepped, stHtfSlowHighStepped, stHtfSlowLowStepped, stHtfSlowCloseStepped, title="HTF smHA slow", color=stHtfSlowCloseStepped > stHtfSlowOpenStepped ? stBandUpColor : stBandDnColor, force_overlay=true)
+
+// =============================================================================
+// ZONE V1 / V2 — lower pane
+// =============================================================================
+
+// Bar midpoint used by both zone classifiers. TypeScript uses
+// (high + low) / 2; the historical Pine used low + abs(high - low) / 2,
+// which is equivalent. Use the TypeScript form for clarity.
+float stBarMid = (high + low) / 2.0
+
+// --- Zone V1: -3 to +3 from bands 1/2/3 (CTF fast, CTF slow, HTF fast) ---
+// Warm-up guard: TypeScript st-zone.ts skips bars where any required band
+// midpoint is NaN. Pine bool comparisons with na return false, so V1 is
+// safe-by-accident, but the explicit guard documents intent and protects
+// against future refactors that might change the comparison chain.
+bool stV1Ready = not na(stCtfFastMid) and not na(stCtfSlowMid) and not na(stHtfFastMidStepped)
+
+// Composite trend category from band 1/2/3 direction flags. The HTF band
+// uses the stepped direction (steppedUp/steppedDown) to match the TypeScript
+// BandResult which computes up/dn from the jagged-stepped O/C values.
+bool stV1ThreeUp = (stCtfFastUp and stCtfSlowUp and stHtfFastUpStepped) or (stCtfFastUp and stCtfSlowDown and stHtfFastUpStepped)
+bool stV1TwoUp = stCtfFastDown and stCtfSlowUp and stHtfFastUpStepped
+bool stV1OneUp = stCtfFastDown and stCtfSlowDown and stHtfFastUpStepped
+bool stV1OneDown = stCtfFastUp and stCtfSlowUp and stHtfFastDownStepped
+bool stV1TwoDown = stCtfFastUp and stCtfSlowDown and stHtfFastDownStepped
+bool stV1ThreeDown = (stHtfFastDownStepped and stCtfSlowDown and stCtfFastDown) or (stHtfFastDownStepped and stCtfSlowUp and stCtfFastDown)
+
+bool stV1IsUpCategory = stV1OneUp or stV1TwoUp or stV1ThreeUp
+bool stV1IsDownCategory = stV1OneDown or stV1TwoDown or stV1ThreeDown
+
+// Zone V1 classification — direct port of st-zone.ts zone logic.
+bool stZoneV1PlusThree = stV1Ready and ((stBarMid > stCtfFastMid and stV1IsUpCategory) or (stBarMid > stHtfFastMidStepped and stV1IsDownCategory))
+bool stZoneV1MinusThree = stV1Ready and ((stBarMid < stCtfFastMid and stV1IsDownCategory) or (stBarMid < stHtfFastMidStepped and stV1IsUpCategory))
+bool stZoneV1PlusTwo = stV1Ready and ((stBarMid > stCtfSlowMid and stBarMid <= stCtfFastMid) and (stV1TwoUp or stV1ThreeUp))
+bool stZoneV1MinusTwo = stV1Ready and ((stBarMid < stCtfSlowMid and stBarMid >= stCtfFastMid) and (stV1TwoDown or stV1ThreeDown))
+bool stZoneV1PlusOne = stV1Ready and ((stBarMid > stHtfFastMidStepped and stBarMid <= stCtfSlowMid) and stV1IsUpCategory)
+bool stZoneV1MinusOne = stV1Ready and ((stBarMid < stHtfFastMidStepped and stBarMid >= stCtfSlowMid) and stV1IsDownCategory)
+
+int stZoneV1 = stZoneV1PlusThree ? 3 : stZoneV1PlusTwo ? 2 : stZoneV1PlusOne ? 1 : stZoneV1MinusOne ? -1 : stZoneV1MinusTwo ? -2 : stZoneV1MinusThree ? -3 : 0
+
+// --- Zone V2: -4 to +4 from all 4 bands ---
+// Warm-up guard: TypeScript st-zone-v2.ts skips bars where any of the four
+// band midpoints is NaN. Without this guard, Pine bool direction flags are
+// all false during warm-up (na comparisons return false), making stV2BaseZone
+// evaluate to -4 and plotting spurious zoneMinusFour crosses. The explicit
+// guard ensures zone 0 (no plot) during warm-up, matching TypeScript.
+bool stV2Ready = not na(stCtfFastMid) and not na(stCtfSlowMid) and not na(stHtfFastMidStepped) and not na(stHtfSlowMidStepped)
+
+// baseZone = sum of (+1/-1) per band direction. The HTF bands use stepped
+// direction to match the TypeScript BandResult up/dn flags.
+int stV2BaseZone = (stCtfFastUp ? 1 : -1) + (stCtfSlowUp ? 1 : -1) + (stHtfFastUpStepped ? 1 : -1) + (stHtfSlowUpStepped ? 1 : -1)
+
+// Refine base zone using bar midpoint vs the opposing band's midpoint.
+// TypeScript classifyZone: base 4/-4 → 4/-4; base 2 → 3 if barMid > bearishMid;
+// base -2 → -3 if barMid < bullishMid; base 0 → 1 if barMid > avgMid else -1.
+int stZoneV2 = 0
+if stV2Ready
+    if stV2BaseZone == 4
+        stZoneV2 := 4
+    else if stV2BaseZone == -4
+        stZoneV2 := -4
+    else if stV2BaseZone == 2
+        // 3 bullish, 1 bearish — use the bearish band's midpoint.
+        float bearishMid = not stCtfFastUp ? stCtfFastMid : not stCtfSlowUp ? stCtfSlowMid : not stHtfFastUpStepped ? stHtfFastMidStepped : stHtfSlowMidStepped
+        stZoneV2 := stBarMid > bearishMid ? 3 : 2
+    else if stV2BaseZone == -2
+        // 3 bearish, 1 bullish — use the bullish band's midpoint.
+        float bullishMid = stCtfFastUp ? stCtfFastMid : stCtfSlowUp ? stCtfSlowMid : stHtfFastUpStepped ? stHtfFastMidStepped : stHtfSlowMidStepped
+        stZoneV2 := stBarMid < bullishMid ? -3 : -2
+    else if stV2BaseZone == 0
+        // 2 bullish, 2 bearish — use average of all four midpoints.
+        float avgMid = (stCtfFastMid + stCtfSlowMid + stHtfFastMidStepped + stHtfSlowMidStepped) / 4.0
+        stZoneV2 := stBarMid > avgMid ? 1 : -1
+    else
+        stZoneV2 := 0
+
+// --- Zone V1 lower-pane plots (range 0..5, matching historical Pine) ---
+// Plotted as crosses at fixed y-levels so each zone value occupies its own
+// row. The historical rb-smha-four-band-plot.pine used this layout.
+plot(stZoneV1 == 3 ? 5 : na, "V1 zonePlusThree", style=plot.style_cross, linewidth=3, color=color.blue)
+plot(stZoneV1 == 2 ? 4 : na, "V1 zonePlusTwo", style=plot.style_cross, linewidth=3, color=color.teal)
+plot(stZoneV1 == 1 ? 3 : na, "V1 zonePlusOne", style=plot.style_cross, linewidth=3, color=color.silver)
+plot(stZoneV1 == -1 ? 2 : na, "V1 zoneMinusOne", style=plot.style_cross, linewidth=3, color=color.white)
+plot(stZoneV1 == -2 ? 1 : na, "V1 zoneMinusTwo", style=plot.style_cross, linewidth=3, color=color.fuchsia)
+plot(stZoneV1 == -3 ? 0 : na, "V1 zoneMinusThree", style=plot.style_cross, linewidth=3, color=color.yellow)
+
+// --- Zone V2 lower-pane plots (fixed rows 7..14, skipping row 6) ---
+// V1 occupies rows 0..5. Row 6 is a blank separator. V2 occupies rows 7..14.
+// Positive zones map to zone+10 (e.g. +4→14, +1→11). Negative zones map to
+// zone+11 (e.g. -1→10, -4→7) so they stack above the V1 rows without overlap.
+plot(stZoneV2 == 4 ? 14 : na, "V2 zonePlusFour", style=plot.style_cross, linewidth=3, color=color.lime)
+plot(stZoneV2 == 3 ? 13 : na, "V2 zonePlusThree", style=plot.style_cross, linewidth=3, color=color.blue)
+plot(stZoneV2 == 2 ? 12 : na, "V2 zonePlusTwo", style=plot.style_cross, linewidth=3, color=color.teal)
+plot(stZoneV2 == 1 ? 11 : na, "V2 zonePlusOne", style=plot.style_cross, linewidth=3, color=color.silver)
+plot(stZoneV2 == -1 ? 10 : na, "V2 zoneMinusOne", style=plot.style_cross, linewidth=3, color=color.white)
+plot(stZoneV2 == -2 ? 9 : na, "V2 zoneMinusTwo", style=plot.style_cross, linewidth=3, color=color.fuchsia)
+plot(stZoneV2 == -3 ? 8 : na, "V2 zoneMinusThree", style=plot.style_cross, linewidth=3, color=color.yellow)
+plot(stZoneV2 == -4 ? 7 : na, "V2 zoneMinusFour", style=plot.style_cross, linewidth=3, color=color.red)
 
 // =============================================================================
 // TREND STRENGTH
