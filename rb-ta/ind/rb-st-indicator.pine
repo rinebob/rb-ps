@@ -293,8 +293,96 @@ plot(stZoneV2 == -3 ? 8 : na, "V2 zoneMinusThree", style=plot.style_cross, linew
 plot(stZoneV2 == -4 ? 7 : na, "V2 zoneMinusFour", style=plot.style_cross, linewidth=3, color=color.red)
 
 // =============================================================================
-// TREND STRENGTH
+// TREND STRENGTH (DI+/-) — lower pane
 // =============================================================================
+
+// ST Trend Strength uses Wilder's DI+/DI- with all lookbacks using the HTF
+// multiplier (3). This matches the TypeScript st-trend-strength.ts and the
+// historical rb-DI-plus-minus-lib.pine. The lookback for true range, directional
+// movement, and Wilder smoothing is [HTF_MULTIPLIER] (i.e. [3]), not [1].
+//
+// The DI histogram (diPlus - diMinus) is the primary visual. It is plotted
+// with a vertical offset so it does not overlap the zone crosses at rows 0-14.
+// Threshold hlines at +10 and -10 (offset) mark the DI strength boundaries.
+//
+// No main-pane dot overlay is produced by this task (per PRD non-goal and
+// Task #232 acceptance criteria).
+
+// DI Trend Strength engine. Returns diPlus, diMinus, diHist, dx, adx.
+// All lookbacks use HTF_MULTIPLIER (3) to match the TypeScript implementation.
+// TypeScript skips the first `mult` bars (if (i < mult) continue); the Pine
+// guard returns na for those bars to avoid nz() coercing missing history to 0,
+// which would produce diHist ≈ 100 on the first 3 bars.
+f_st_trend_strength(
+    series float srcHigh,
+    series float srcLow,
+    series float srcClose,
+    simple int adxLength) =>
+    // Warm-up guard: skip the first HTF_MULTIPLIER bars (matching TypeScript).
+    bool stDiReady = bar_index >= HTF_MULTIPLIER
+
+    // True Range with HTF multiplier lookback: max(H-L, |H-prevClose|, |L-prevClose|)
+    float prevClose = nz(srcClose[HTF_MULTIPLIER])
+    float trueRange = math.max(math.max(srcHigh - srcLow, math.abs(srcHigh - prevClose)), math.abs(srcLow - prevClose))
+
+    // Directional Movement with HTF multiplier lookback
+    float upMove = srcHigh - nz(srcHigh[HTF_MULTIPLIER])
+    float downMove = nz(srcLow[HTF_MULTIPLIER]) - srcLow
+    float dmPlus = (upMove > downMove and upMove > 0) ? upMove : 0.0
+    float dmMinus = (downMove > upMove and downMove > 0) ? downMove : 0.0
+
+    // Wilder smoothing: smoothed[i] = smoothed[i-mult] - (smoothed[i-mult]/period) + current
+    // nz() converts na to 0, matching TypeScript's nz() for the initial bars.
+    float smoothedTR = 0.0
+    smoothedTR := nz(smoothedTR[HTF_MULTIPLIER]) - (nz(smoothedTR[HTF_MULTIPLIER]) / adxLength) + trueRange
+
+    float smoothedDMPlus = 0.0
+    smoothedDMPlus := nz(smoothedDMPlus[HTF_MULTIPLIER]) - (nz(smoothedDMPlus[HTF_MULTIPLIER]) / adxLength) + dmPlus
+
+    float smoothedDMMinus = 0.0
+    smoothedDMMinus := nz(smoothedDMMinus[HTF_MULTIPLIER]) - (nz(smoothedDMMinus[HTF_MULTIPLIER]) / adxLength) + dmMinus
+
+    // DI+ and DI- (na during warm-up to match TypeScript skip behavior)
+    float diPlus = stDiReady ? (smoothedTR != 0 ? (smoothedDMPlus / smoothedTR) * 100.0 : 0.0) : na
+    float diMinus = stDiReady ? (smoothedTR != 0 ? (smoothedDMMinus / smoothedTR) * 100.0 : 0.0) : na
+
+    // DX and ADX
+    float diSum = diPlus + diMinus
+    float dx = stDiReady ? (diSum != 0 ? (math.abs(diPlus - diMinus) / diSum) * 100.0 : 0.0) : na
+    float adx = ta.sma(dx, adxLength)
+
+    // DI histogram
+    float diHist = stDiReady ? (diPlus - diMinus) : na
+
+    [diPlus, diMinus, diHist, dx, adx]
+
+// Instantiate Trend Strength on chart OHLC with the fixed DI length.
+[stDiPlus, stDiMinus, stDiHist, stDx, stAdx] = f_st_trend_strength(high, low, close, DI_LENGTH)
+
+// Plot the DI histogram in the lower pane, offset below the zone crosses.
+// Zones occupy rows 0-14. diHist can range roughly -60 to +60 in strong trends.
+// The offset of -80 places the zero line at -80, thresholds at -70 and -90,
+// and a diHist of +60 at -20 — clearly below the zone area.
+const float ST_DI_HIST_OFFSET = -80.0
+const float DI_ZERO_OFFSET = ST_DI_HIST_OFFSET
+const float DI_UPPER_OFFSET = DI_UPPER_THRESHOLD + ST_DI_HIST_OFFSET
+const float DI_LOWER_OFFSET = DI_LOWER_THRESHOLD + ST_DI_HIST_OFFSET
+
+color stDiHistColor = stDiHist > 0 ? color.new(color.blue, 0) : color.new(color.yellow, 0)
+plot(stDiHist + ST_DI_HIST_OFFSET, "DI Histogram", color=stDiHistColor, style=plot.style_histogram, linewidth=3)
+
+// Threshold and zero lines for the DI histogram (all offset).
+hline(DI_ZERO_OFFSET, "DI Zero", color=color.gray, linestyle=hline.style_dotted)
+hline(DI_UPPER_OFFSET, "DI Upper Threshold", color=color.gray, linestyle=hline.style_dashed)
+hline(DI_LOWER_OFFSET, "DI Lower Threshold", color=color.gray, linestyle=hline.style_dashed)
+
+// Hidden named plots for CSV export validation (diPlus, diMinus, dx, adx).
+// display.data_window keeps them out of the pane but available in the Data
+// Window and "Export chart data" CSV output for validation task #235.
+plot(stDiPlus, "DI+", color=color.new(color.blue, 100), display=display.data_window)
+plot(stDiMinus, "DI-", color=color.new(color.yellow, 100), display=display.data_window)
+plot(stDx, "DX", color=color.new(color.white, 100), display=display.data_window)
+plot(stAdx, "ADX", color=color.new(color.orange, 100), display=display.data_window)
 
 // =============================================================================
 // MAIN-PANE EVENT OVERLAY
