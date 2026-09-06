@@ -385,8 +385,101 @@ plot(stDx, "DX", color=color.new(color.white, 100), display=display.data_window)
 plot(stAdx, "ADX", color=color.new(color.orange, 100), display=display.data_window)
 
 // =============================================================================
-// MAIN-PANE EVENT OVERLAY
+// MAIN-PANE EVENT OVERLAY — Zone V1/V2 signal-event dots
 // =============================================================================
 
-// The final indicator uses lower-pane plots by default. Price-pane series and
-// Zone V1/V2 event markers will opt into the main chart with force_overlay=true.
+// ST Trend Rider signal-event dots on the main price pane.
+//
+// Signal rules (ported from st-trend-rider-dots.indicator.ts):
+//   Long  (window open when V2 zone > 0): V1/V2 zone was falling while
+//          already >= +1, then upticks once → long dot below candle.
+//          No repeat until zone falls (delta < 0), then upticks again.
+//          Flat bars (delta == 0) do not change state.
+//   Short (window open when V2 zone < 0): V1/V2 zone was rising while
+//          already <= -1, then downticks once → short dot above candle.
+//          No repeat until zone rises (delta > 0), then downticks again.
+//          Flat bars (delta == 0) do not change state.
+//
+// Placement: long dots at bar.low - ATR*2.5, short dots at bar.high + ATR*2.5.
+// V1 and V2 are visually distinguishable (different colors/shapes).
+// Long and short are visually distinguishable (above vs below candle).
+// No strategy side effects — this is an indicator, not a strategy.
+
+// ATR for dot offset sizing. Pine's built-in ta.atr uses Wilder's smoothing,
+// matching the TypeScript computeATR (SMA seed + EMA-style smoothing).
+float stAtr = ta.atr(ATR_LENGTH)
+float stDotOffset = stAtr * ZONE_DOT_ATR_MULTIPLIER
+
+// --- V1 Trend Rider dots ---
+// Uses V1 zone for transitions, V2 zone for window-open check.
+// State machine: READY = waiting for uptick/downtick, FIRED = already signalled.
+var int stV1LongState = 0   // 0 = READY, 1 = FIRED
+var int stV1ShortState = 0  // 0 = READY, 1 = FIRED
+
+int stV1PrevZone = nz(stZoneV1[1], 0)
+int stV1Delta = stZoneV1 - stV1PrevZone
+
+// V1 Long: window open when V2 zone > 0, prev V1 zone >= 1, V1 uptick
+bool stV1LongEvent = false
+if stZoneV2 > 0
+    if stV1Delta > 0
+        if stV1LongState == 0 and stV1PrevZone >= 1
+            stV1LongEvent := true
+            stV1LongState := 1
+    else if stV1Delta < 0
+        stV1LongState := 0
+else
+    stV1LongState := 0
+
+// V1 Short: window open when V2 zone < 0, prev V1 zone <= -1, V1 downtick
+bool stV1ShortEvent = false
+if stZoneV2 < 0
+    if stV1Delta < 0
+        if stV1ShortState == 0 and stV1PrevZone <= -1
+            stV1ShortEvent := true
+            stV1ShortState := 1
+    else if stV1Delta > 0
+        stV1ShortState := 0
+else
+    stV1ShortState := 0
+
+// V1 dot plots — circles below (long) / above (short) candle, force_overlay for main pane.
+plot(stV1LongEvent ? low - stDotOffset : na, "V1 Long", style=plot.style_circles, linewidth=3, color=color.new(color.green, 0), force_overlay=true)
+plot(stV1ShortEvent ? high + stDotOffset : na, "V1 Short", style=plot.style_circles, linewidth=3, color=color.new(color.red, 0), force_overlay=true)
+
+// --- V2 Trend Rider dots ---
+// Uses V2 zone for both transitions and window-open check.
+var int stV2LongState = 0   // 0 = READY, 1 = FIRED
+var int stV2ShortState = 0  // 0 = READY, 1 = FIRED
+
+int stV2PrevZone = nz(stZoneV2[1], 0)
+int stV2Delta = stZoneV2 - stV2PrevZone
+
+// V2 Long: window open when V2 zone > 0, prev V2 zone >= 1, V2 uptick
+bool stV2LongEvent = false
+if stZoneV2 > 0
+    if stV2Delta > 0
+        if stV2LongState == 0 and stV2PrevZone >= 1
+            stV2LongEvent := true
+            stV2LongState := 1
+    else if stV2Delta < 0
+        stV2LongState := 0
+else
+    stV2LongState := 0
+
+// V2 Short: window open when V2 zone < 0, prev V2 zone <= -1, V2 downtick
+bool stV2ShortEvent = false
+if stZoneV2 < 0
+    if stV2Delta < 0
+        if stV2ShortState == 0 and stV2PrevZone <= -1
+            stV2ShortEvent := true
+            stV2ShortState := 1
+    else if stV2Delta > 0
+        stV2ShortState := 0
+else
+    stV2ShortState := 0
+
+// V2 dot plots — crosses below (long) / above (short) candle, force_overlay for main pane.
+// V2 uses a different shape (cross) from V1 (circle) so they are visually distinguishable.
+plot(stV2LongEvent ? low - stDotOffset : na, "V2 Long", style=plot.style_cross, linewidth=3, color=color.new(color.lime, 0), force_overlay=true)
+plot(stV2ShortEvent ? high + stDotOffset : na, "V2 Short", style=plot.style_cross, linewidth=3, color=color.new(color.orange, 0), force_overlay=true)
