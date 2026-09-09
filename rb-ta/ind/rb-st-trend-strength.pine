@@ -1,0 +1,122 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © rinebob
+
+//@version=6
+indicator("Savant Trader Trend Strength", "ST Strength", overlay=false, timeframe="", timeframe_gaps=false)
+
+// Standalone, read-only ST Trend Strength indicator.
+//
+// This companion script intentionally owns its lower pane so the Zone V1/V2
+// markers from rb-st-zones.pine can occupy a separate pane. The histogram
+// is plotted at its true DI+ - DI- value, centered around zero; it is not
+// vertically offset by the zone rows.
+//
+// This chart-timeframe DI reference uses current chart OHLC. No app, Firebase,
+// broker, or TypeScript runtime is required.
+
+// =============================================================================
+// FIXED ST CONFIGURATION
+// =============================================================================
+
+// The historical visible DI plot passes chart timeframe seconds into the
+// library, which produces a one-bar lookback. Keep this separate from the
+// Trend Bands HTF multiplier so the histogram matches that reference plot.
+const int DI_LOOKBACK = 1
+const int HTF_MULTIPLIER = 3
+const int DI_LENGTH = 14
+const float DI_UPPER_THRESHOLD = 10.0
+const float DI_LOWER_THRESHOLD = -10.0
+
+const color HTF_UP_COLOR = #0D47A1
+const color HTF_DOWN_COLOR = #8A6D00
+
+bool showHtfTrendStrength = input.bool(true, "Show HTF Trend Strength")
+
+// =============================================================================
+// TREND STRENGTH (DI+/-)
+// =============================================================================
+
+// Returns diPlus, diMinus, diHist, dx, adx for the supplied lookback.
+// The readiness guard wraps the entire calculation so missing history cannot
+// seed the smoothers.
+f_st_trend_strength(
+    series float srcHigh,
+    series float srcLow,
+    series float srcClose,
+    simple int adxLength,
+    simple int lookback) =>
+    bool stDiReady = bar_index >= lookback
+    float smoothedTR = 0.0
+    float smoothedDMPlus = 0.0
+    float smoothedDMMinus = 0.0
+    float diPlus = na
+    float diMinus = na
+    float dx = na
+    float diHist = na
+
+    if stDiReady
+        // True Range: max(H-L, |H-prevClose|, |L-prevClose|).
+        float prevClose = nz(srcClose[lookback])
+        float trueRange = math.max(math.max(srcHigh - srcLow, math.abs(srcHigh - prevClose)), math.abs(srcLow - prevClose))
+
+        // Directional Movement with the supplied lookback.
+        float upMove = srcHigh - nz(srcHigh[lookback])
+        float downMove = nz(srcLow[lookback]) - srcLow
+        float dmPlus = (upMove > downMove and upMove > 0) ? upMove : 0.0
+        float dmMinus = (downMove > upMove and downMove > 0) ? downMove : 0.0
+
+        // Established ST recurrence: previous - previous/period + current.
+        smoothedTR := nz(smoothedTR[lookback]) - (nz(smoothedTR[lookback]) / adxLength) + trueRange
+        smoothedDMPlus := nz(smoothedDMPlus[lookback]) - (nz(smoothedDMPlus[lookback]) / adxLength) + dmPlus
+        smoothedDMMinus := nz(smoothedDMMinus[lookback]) - (nz(smoothedDMMinus[lookback]) / adxLength) + dmMinus
+
+        diPlus := smoothedTR != 0 ? (smoothedDMPlus / smoothedTR) * 100.0 : 0.0
+        diMinus := smoothedTR != 0 ? (smoothedDMMinus / smoothedTR) * 100.0 : 0.0
+        float diSum = diPlus + diMinus
+        dx := diSum != 0 ? (math.abs(diPlus - diMinus) / diSum) * 100.0 : 0.0
+        diHist := diPlus - diMinus
+
+    float adx = ta.sma(dx, adxLength)
+    [diPlus, diMinus, diHist, dx, adx]
+
+[stDiPlus, stDiMinus, stDiHist, stDx, stAdx] = f_st_trend_strength(high, low, close, DI_LENGTH, DI_LOOKBACK)
+[stHtfDiPlusRaw, stHtfDiMinusRaw, stHtfDiHistRaw, stHtfDxRaw, stHtfAdxRaw] = f_st_trend_strength(high, low, close, DI_LENGTH, HTF_MULTIPLIER)
+
+// Hold the HTF result at the latest 3-period boundary, matching the stepped
+// HTF Trend Bands behavior instead of exposing raw intrablock fluctuations.
+string stHtfTimeframe = timeframe.from_seconds(timeframe.in_seconds() * HTF_MULTIPLIER)
+int stHtfCloseTime = request.security(syminfo.tickerid, stHtfTimeframe, time_close, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+bool stHtfCloseMatch = time_close == stHtfCloseTime
+var float stHtfDiPlus = na
+var float stHtfDiMinus = na
+var float stHtfDiHist = na
+var float stHtfDx = na
+var float stHtfAdx = na
+stHtfDiPlus := stHtfCloseMatch ? stHtfDiPlusRaw : stHtfDiPlus[1]
+stHtfDiMinus := stHtfCloseMatch ? stHtfDiMinusRaw : stHtfDiMinus[1]
+stHtfDiHist := stHtfCloseMatch ? stHtfDiHistRaw : stHtfDiHist[1]
+stHtfDx := stHtfCloseMatch ? stHtfDxRaw : stHtfDx[1]
+stHtfAdx := stHtfCloseMatch ? stHtfAdxRaw : stHtfAdx[1]
+
+// Draw HTF first so the chart-timeframe histogram is the foreground series.
+// The HTF value uses the same 3-period stepped lookback concept as Trend Bands.
+color stHtfDiHistColor = stHtfDiHist > 0 ? color.new(HTF_UP_COLOR, 0) : color.new(HTF_DOWN_COLOR, 0)
+plot(showHtfTrendStrength ? stHtfDiHist : na, "HTF DI Histogram", color=stHtfDiHistColor, style=plot.style_histogram, linewidth=3)
+
+// Chart-timeframe histogram is plotted second so it renders in front of HTF.
+color stDiHistColor = stDiHist > 0 ? color.new(color.blue, 0) : color.new(color.yellow, 0)
+plot(stDiHist, "DI Histogram", color=stDiHistColor, style=plot.style_histogram, linewidth=3)
+
+hline(0.0, "DI Zero", color=color.gray, linestyle=hline.style_dotted, linewidth=2)
+hline(DI_UPPER_THRESHOLD, "DI Upper Threshold (+10)", color=color.new(color.green, 0), linestyle=hline.style_dashed, linewidth=1)
+hline(DI_LOWER_THRESHOLD, "DI Lower Threshold (-10)", color=color.new(color.red, 0), linestyle=hline.style_dashed, linewidth=1)
+
+// Hidden named plots for Data Window and chart-data CSV validation.
+plot(stDiPlus, "DI+", color=color.new(color.blue, 100), display=display.data_window)
+plot(stDiMinus, "DI-", color=color.new(color.yellow, 100), display=display.data_window)
+plot(stDx, "DX", color=color.new(color.white, 100), display=display.data_window)
+plot(stAdx, "ADX", color=color.new(color.orange, 100), display=display.data_window)
+plot(showHtfTrendStrength ? stHtfDiPlus : na, "HTF DI+", color=color.new(HTF_UP_COLOR, 100), display=display.data_window)
+plot(showHtfTrendStrength ? stHtfDiMinus : na, "HTF DI-", color=color.new(HTF_DOWN_COLOR, 100), display=display.data_window)
+plot(showHtfTrendStrength ? stHtfDx : na, "HTF DX", color=color.new(HTF_UP_COLOR, 100), display=display.data_window)
+plot(showHtfTrendStrength ? stHtfAdx : na, "HTF ADX", color=color.new(HTF_DOWN_COLOR, 100), display=display.data_window)

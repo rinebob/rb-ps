@@ -1,0 +1,90 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © rinebob
+
+//@version=6
+indicator("Savant Trader Trend Bands", "ST Bands", overlay=true, timeframe="", timeframe_gaps=false)
+
+// Standalone, read-only ST Trend Bands main-pane indicator.
+// Zone V1/V2 and event dots are provided by rb-st-zones.pine.
+// Trend Strength is provided by rb-st-trend-strength.pine.
+
+const int CTF_FAST_LENGTH = 5
+const int CTF_SLOW_LENGTH = 10
+const int HTF_MULTIPLIER = 3
+
+f_ema(series float source, simple int length) =>
+    float alpha = 2.0 / (length + 1.0)
+    float seed = ta.sma(source, length)
+    var float value = na
+    value := na(value) ? seed : na(source) ? value : source * alpha + value * (1.0 - alpha)
+    value
+
+f_smha_ctf(
+    series float sourceOpen,
+    series float sourceHigh,
+    series float sourceLow,
+    series float sourceClose,
+    simple int smoothLength,
+    simple int afterSmoothLength) =>
+    float smoothOpen = f_ema(sourceOpen, smoothLength)
+    float smoothHigh = f_ema(sourceHigh, smoothLength)
+    float smoothLow = f_ema(sourceLow, smoothLength)
+    float smoothClose = f_ema(sourceClose, smoothLength)
+    float haClose = (smoothOpen + smoothHigh + smoothLow + smoothClose) / 4.0
+    var float haOpen = na
+    haOpen := na(haClose) ? na : na(haOpen[1]) ? (smoothOpen + smoothClose) / 2.0 : (haOpen[1] + haClose[1]) / 2.0
+    float haHigh = math.max(smoothHigh, math.max(haOpen, haClose))
+    float haLow = math.min(smoothLow, math.min(haOpen, haClose))
+    float postOpen = f_ema(haOpen, afterSmoothLength)
+    float postClose = f_ema(haClose, afterSmoothLength)
+    float bandHigh = math.max(postOpen, postClose)
+    float bandLow = math.min(postOpen, postClose)
+    bool bandUp = postClose > postOpen
+    bool bandDown = postOpen > postClose
+    [postOpen, bandHigh, bandLow, postClose, bandUp, bandDown]
+
+f_smha_htf(
+    series float sourceOpen,
+    series float sourceHigh,
+    series float sourceLow,
+    series float sourceClose,
+    series int htfCloseTime,
+    simple int smoothLength,
+    simple int afterSmoothLength) =>
+    int beforeLength = smoothLength * HTF_MULTIPLIER
+    int afterLength = afterSmoothLength * HTF_MULTIPLIER
+    bool closeTimeMatch = time_close == htfCloseTime
+    float smoothOpen = f_ema(sourceOpen, beforeLength)
+    float smoothHigh = f_ema(sourceHigh, beforeLength)
+    float smoothLow = f_ema(sourceLow, beforeLength)
+    float smoothClose = f_ema(sourceClose, beforeLength)
+    float haClose = (smoothOpen + smoothHigh + smoothLow + smoothClose) / 4.0
+    var float haOpen = na
+    haOpen := na(haClose) ? na : na(haOpen[HTF_MULTIPLIER]) ? (smoothOpen + smoothClose) / 2.0 : (haOpen[HTF_MULTIPLIER] + haClose[HTF_MULTIPLIER]) / 2.0
+    float postOpen = f_ema(haOpen, afterLength)
+    float postClose = f_ema(haClose, afterLength)
+    var float steppedOpen = na
+    var float steppedClose = na
+    steppedOpen := closeTimeMatch and not na(postOpen) ? postOpen : steppedOpen[1]
+    steppedClose := closeTimeMatch and not na(postClose) ? postClose : steppedClose[1]
+    bool steppedUp = steppedClose > steppedOpen
+    bool steppedDown = steppedOpen > steppedClose
+    float steppedHigh = math.max(steppedOpen, steppedClose)
+    float steppedLow = math.min(steppedOpen, steppedClose)
+    [steppedOpen, steppedHigh, steppedLow, steppedClose, steppedUp, steppedDown]
+
+string stHtfTimeframe = timeframe.from_seconds(timeframe.in_seconds() * HTF_MULTIPLIER)
+int stHtfCloseTime = request.security(syminfo.tickerid, stHtfTimeframe, time_close, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+
+[stCtfFastOpen, stCtfFastHigh, stCtfFastLow, stCtfFastClose, stCtfFastUp, stCtfFastDown] = f_smha_ctf(open, high, low, close, CTF_FAST_LENGTH, CTF_FAST_LENGTH)
+[stCtfSlowOpen, stCtfSlowHigh, stCtfSlowLow, stCtfSlowClose, stCtfSlowUp, stCtfSlowDown] = f_smha_ctf(open, high, low, close, CTF_SLOW_LENGTH, CTF_SLOW_LENGTH)
+[stHtfFastOpen, stHtfFastHigh, stHtfFastLow, stHtfFastClose, stHtfFastUp, stHtfFastDown] = f_smha_htf(open, high, low, close, stHtfCloseTime, CTF_FAST_LENGTH, CTF_FAST_LENGTH)
+[stHtfSlowOpen, stHtfSlowHigh, stHtfSlowLow, stHtfSlowClose, stHtfSlowUp, stHtfSlowDown] = f_smha_htf(open, high, low, close, stHtfCloseTime, CTF_SLOW_LENGTH, CTF_SLOW_LENGTH)
+
+color stBandUpColor = color.new(color.yellow, 0)
+color stBandDnColor = color.new(color.blue, 0)
+
+plotcandle(stCtfFastOpen, stCtfFastHigh, stCtfFastLow, stCtfFastClose, title="CTF smHA fast", color=stCtfFastClose > stCtfFastOpen ? stBandUpColor : stBandDnColor, wickcolor=stCtfFastClose > stCtfFastOpen ? stBandUpColor : stBandDnColor, bordercolor=stCtfFastClose > stCtfFastOpen ? stBandUpColor : stBandDnColor)
+plotcandle(stCtfSlowOpen, stCtfSlowHigh, stCtfSlowLow, stCtfSlowClose, title="CTF smHA slow", color=stCtfSlowClose > stCtfSlowOpen ? stBandUpColor : stBandDnColor, wickcolor=stCtfSlowClose > stCtfSlowOpen ? stBandUpColor : stBandDnColor, bordercolor=stCtfSlowClose > stCtfSlowOpen ? stBandUpColor : stBandDnColor)
+plotcandle(stHtfFastOpen, stHtfFastHigh, stHtfFastLow, stHtfFastClose, title="HTF smHA fast", color=stHtfFastClose > stHtfFastOpen ? stBandUpColor : stBandDnColor, wickcolor=stHtfFastClose > stHtfFastOpen ? stBandUpColor : stBandDnColor, bordercolor=stHtfFastClose > stHtfFastOpen ? stBandUpColor : stBandDnColor)
+plotcandle(stHtfSlowOpen, stHtfSlowHigh, stHtfSlowLow, stHtfSlowClose, title="HTF smHA slow", color=stHtfSlowClose > stHtfSlowOpen ? stBandUpColor : stBandDnColor, wickcolor=stHtfSlowClose > stHtfSlowOpen ? stBandUpColor : stBandDnColor, bordercolor=stHtfSlowClose > stHtfSlowOpen ? stBandUpColor : stBandDnColor)
