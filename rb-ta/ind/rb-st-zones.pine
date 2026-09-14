@@ -174,7 +174,27 @@ if stZoneV2 < 0
         stV2ShortState := 0
 else
     stV2ShortState := 0
+
+// Trend Rider Zero Cross: sign flip detection (no state machine, no confirmation delay).
+// Fires on the cross bar when the zone value flips sign between consecutive bars.
+// Zero is treated as neutral — transitions to/from zero do not trigger.
+bool stV1ZeroCrossLong  = stZoneV1[1] < 0 and stZoneV1 > 0
+bool stV1ZeroCrossShort = stZoneV1[1] > 0 and stZoneV1 < 0
+bool stV2ZeroCrossLong  = stZoneV2[1] < 0 and stZoneV2 > 0
+bool stV2ZeroCrossShort = stZoneV2[1] > 0 and stZoneV2 < 0
+
 plot(stV1LongEvent ? low - stDotOffset : na, "V1 Long", style=plot.style_circles, linewidth=3, color=color.green, force_overlay=true)
 plot(stV1ShortEvent ? high + stDotOffset : na, "V1 Short", style=plot.style_circles, linewidth=3, color=color.red, force_overlay=true)
 plot(stV2LongEvent ? low - stDotOffset : na, "V2 Long", style=plot.style_cross, linewidth=3, color=color.lime, force_overlay=true)
 plot(stV2ShortEvent ? high + stDotOffset : na, "V2 Short", style=plot.style_cross, linewidth=3, color=color.orange, force_overlay=true)
+
+// Trend Rider Zero Cross plots — early entry dots on sign flip.
+// Teal (long) and orange (short), matching the TS implementation colors exactly.
+// V1 uses style_circles (same as V1 Trend Rider), V2 uses style_cross (same as V2 Trend Rider).
+// Note: V2 short zero-cross uses the same color/style as V2 short Trend Rider — this
+// matches the TS implementation which also uses #ff9800 for both. Visual distinction
+// for zero-cross vs confirmation is primarily via the long color (teal vs green/lime).
+plot(stV1ZeroCrossLong ? low - stDotOffset : na, "V1 Zero Cross Long", style=plot.style_circles, linewidth=3, color=color.rgb(0, 150, 136), force_overlay=true)
+plot(stV1ZeroCrossShort ? high + stDotOffset : na, "V1 Zero Cross Short", style=plot.style_circles, linewidth=3, color=color.orange, force_overlay=true)
+plot(stV2ZeroCrossLong ? low - stDotOffset : na, "V2 Zero Cross Long", style=plot.style_cross, linewidth=3, color=color.rgb(0, 150, 136), force_overlay=true)
+plot(stV2ZeroCrossShort ? high + stDotOffset : na, "V2 Zero Cross Short", style=plot.style_cross, linewidth=3, color=color.orange, force_overlay=true)
